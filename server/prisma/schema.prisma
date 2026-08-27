@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String?
+  email     String   @unique
+  password  String
+  roleId    Int
+  role      Role     @relation(fields: [roleId], references: [id])
+  tickets   Ticket[] // Tickets issued by this user (Conductor)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  conductor Conductors? 
+}
+
+model Role {
+  id    Int    @id @default(autoincrement())
+  name  String @unique // 'admin', 'conductor', 'passenger'
+  users User[]
+}
+
+model Bus {
+  id           Int      @id @default(autoincrement())
+  busNumber    String   @unique
+  capacity     Int      @default(50)
+  conductorId  Int?     @unique
+  conductor    Conductors? @relation(fields: [conductorId], references: [id])
+  trips        Trip[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Route {
+  id          Int         @id @default(autoincrement())
+  name        String
+  routeStops  RouteStop[]
+  trips       Trip[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Stop {
+  id          Int         @id @default(autoincrement())
+  name        String      @unique
+  latitude    Float?
+  longitude   Float?
+  routeStops  RouteStop[]
+}
+
+model RouteStop {
+  id          Int      @id @default(autoincrement())
+  routeId     Int
+  stopId      Int
+  stopOrder   Int
+  route       Route    @relation(fields: [routeId], references: [id])
+  stop        Stop     @relation(fields: [stopId], references: [id])
+  
+  @@unique([routeId, stopId])
+}
+
+model Conductors {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @unique
+  user        User     @relation(fields: [userId], references: [id])
+  assignedBus Bus?
+}
+
+model Trip {
+  id               Int      @id @default(autoincrement())
+  busId            Int
+  routeId          Int
+  startTime        DateTime @default(now())
+  endTime          DateTime?
+  status           String   @default("active") // active, completed
+  currentStopId    Int?
+  currentOccupancy Int      @default(0)
+  revenue          Float    @default(0.0)
+  bus              Bus      @relation(fields: [busId], references: [id])
+  route            Route    @relation(fields: [routeId], references: [id])
+  tickets          Ticket[]
+  locations        BusLocation[]
+  occupancyHistory OccupancyHistory[]
+}
+
+model Ticket {
+  id             Int      @id @default(autoincrement())
+  tripId         Int
+  fromStopId     Int
+  toStopId       Int
+  passengerCount Int      @default(1)
+  issuedById     Int?
+  trip           Trip     @relation(fields: [tripId], references: [id])
+  issuedBy       User?    @relation(fields: [issuedById], references: [id])
+  createdAt      DateTime @default(now())
+}
+
+model BusLocation {
+  id        Int      @id @default(autoincrement())
+  tripId    Int
+  latitude  Float
+  longitude Float
+  timestamp DateTime @default(now())
+  trip      Trip     @relation(fields: [tripId], references: [id])
+}
+
+model OccupancyHistory {
+  id             Int      @id @default(autoincrement())
+  tripId         Int
+  stopId         Int
+  occupancyCount Int
+  timestamp      DateTime @default(now())
+  trip           Trip     @relation(fields: [tripId], references: [id])
+}
+
+model Prediction {
+  id               Int      @id @default(autoincrement())
+  routeId          Int
+  timeOfDay        String   // e.g., '08:00', '17:00'
+  dayOfWeek        Int      // 0 = Sunday, 1 = Monday, etc.
+  expectedOccupancy Int
+}

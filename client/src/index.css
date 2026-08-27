@@ -1,0 +1,50 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+/*
+ * Tailwind CSS v4 theme.
+ * Tokens are declared here (not tailwind.config.js) because the v4 PostCSS
+ * plugin does not auto-load the legacy JS config. Declaring them in @theme
+ * both emits the utility classes (bg-card, text-text-secondary, crowd-*, ...)
+ * and exposes them as CSS variables (var(--color-accent), ...).
+ */
+@theme {
+  --font-sans: 'Inter', sans-serif;
+
+  --color-dark: #0B1120;
+  --color-card: #111827;
+  --color-hover: #1F2937;
+  --color-accent: #3B82F6;
+
+  --color-text-primary: #F8FAFC;
+  --color-text-secondary: #94A3B8;
+
+  --color-border-subtle: #1E293B;
+
+  --color-crowd-low: #22C55E;
+  --color-crowd-mod: #F59E0B;
+  --color-crowd-high: #F97316;
+  --color-crowd-full: #EF4444;
+
+  --shadow-soft: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+}
+
+:root {
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Inter', sans-serif;
+  color: #F8FAFC;
+  background-color: #0B1120;
+}
+
+#root {
+  min-height: 100vh;
+}
