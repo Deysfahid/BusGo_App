@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { apiRequest } from '../lib/api'
-import { Bus, Route as RouteIcon, MapPin, Users, Ticket, TrendingUp, DollarSign, Plus, Search, Trash2 } from 'lucide-react'
+import { Bus, Route as RouteIcon, MapPin, Users, Ticket, TrendingUp, DollarSign, Plus, Search, Trash2, Brain, Clock, Activity } from 'lucide-react'
 
 export default function AdminDashboard() {
   const location = useLocation()
@@ -14,6 +14,7 @@ export default function AdminDashboard() {
     if (path.includes('/stops')) return 'stops'
     if (path.includes('/conductors')) return 'conductors'
     if (path.includes('/analytics')) return 'analytics'
+    if (path.includes('/predictions')) return 'predictions'
     return 'overview'
   }
 
@@ -27,6 +28,7 @@ export default function AdminDashboard() {
       case 'stops': return <StopsTab />
       case 'conductors': return <ConductorsTab />
       case 'analytics': return <AnalyticsTab />
+      case 'predictions': return <PredictionsTab />
       default: return <OverviewTab />
     }
   }
@@ -712,6 +714,116 @@ function AnalyticsTab() {
             )}
           </ul>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// --- Phase 8: ML Predictions panel ---
+function heatColor(occ, cap) {
+  const frac = cap > 0 ? occ / cap : 0
+  if (frac >= 0.9) return 'bg-crowd-full'
+  if (frac >= 0.6) return 'bg-crowd-high'
+  if (frac >= 0.3) return 'bg-crowd-mod'
+  if (occ > 0) return 'bg-crowd-low'
+  return 'bg-hover'
+}
+
+function PredictionsTab() {
+  const [summary, setSummary] = useState(null)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    const token = localStorage.getItem('busgo_token')
+    apiRequest('/api/admin/predictions/summary', { authToken: token })
+      .then(res => setSummary(res.data))
+      .catch(err => setError(err.message))
+  }, [])
+
+  if (error) return <div className="text-red-400">Failed to load predictions: {error}</div>
+  if (!summary) return <div className="text-text-secondary">Loading predictions...</div>
+
+  const trainedLabel = summary.lastTrainedAt
+    ? new Date(summary.lastTrainedAt).toLocaleString()
+    : 'Not trained yet'
+  const cap = summary.nominalCapacity || 50
+  const dowNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+  const statCards = [
+    { title: 'Occupancy Model', value: summary.modelActive ? 'Active' : 'Cold (heuristic)', icon: Brain, color: summary.modelActive ? 'text-emerald-400' : 'text-text-secondary' },
+    { title: 'ETA Model', value: summary.etaModelActive ? 'Active' : 'Cold (heuristic)', icon: Activity, color: summary.etaModelActive ? 'text-emerald-400' : 'text-text-secondary' },
+    { title: 'Occupancy RMSE', value: summary.occupancyRmse != null ? `${summary.occupancyRmse} seats` : '—', icon: TrendingUp, color: 'text-accent' },
+    { title: 'ETA RMSE', value: summary.etaRmse != null ? `${summary.etaRmse}s` : '—', icon: Clock, color: 'text-purple-400' },
+  ]
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-2">
+        <Brain size={26} className="text-accent" />
+        <h2 className="text-2xl font-bold">AI Predictions</h2>
+      </div>
+      <p className="text-text-secondary text-sm mb-6">
+        RandomForest models trained inside the backend on {summary.occupancySampleCount} occupancy &amp; {summary.travelSampleCount} travel-time samples.
+        Last trained: <span className="text-text-primary">{trainedLabel}</span>.
+      </p>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {statCards.map(c => {
+          const Icon = c.icon
+          return (
+            <div key={c.title} className="bg-card border border-border-subtle rounded-2xl p-5">
+              <div className="flex items-center gap-2 text-text-secondary text-xs font-medium mb-2">
+                <Icon size={16} className={c.color} /> {c.title}
+              </div>
+              <p className={`text-xl font-bold ${c.color}`}>{c.value}</p>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="bg-card border border-border-subtle rounded-2xl p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+          <h3 className="font-semibold">Predicted Occupancy by Hour</h3>
+          <span className="text-xs text-text-secondary">Representative day: {dowNames[summary.representativeDayOfWeek] || `Day ${summary.representativeDayOfWeek}`} · capacity {cap}</span>
+        </div>
+        <p className="text-text-secondary text-xs mb-5">Average forecast across each route's stops, per hour of day (0–23).</p>
+
+        {(summary.routes || []).length === 0 ? (
+          <div className="text-text-secondary text-sm py-6 text-center">No routes with stops to forecast.</div>
+        ) : (
+          <div className="space-y-5 overflow-x-auto">
+            {/* Hour axis */}
+            <div className="flex items-center gap-3 min-w-[720px]">
+              <div className="w-40 flex-shrink-0" />
+              <div className="flex-1 grid grid-cols-[repeat(24,minmax(0,1fr))] gap-1">
+                {Array.from({ length: 24 }).map((_, h) => (
+                  <div key={h} className="text-[9px] text-text-secondary text-center">{h % 3 === 0 ? h : ''}</div>
+                ))}
+              </div>
+            </div>
+            {summary.routes.map(route => (
+              <div key={route.routeId} className="flex items-center gap-3 min-w-[720px]">
+                <div className="w-40 flex-shrink-0 truncate text-sm font-medium" title={route.routeName}>{route.routeName}</div>
+                <div className="flex-1 grid grid-cols-[repeat(24,minmax(0,1fr))] gap-1">
+                  {(route.occupancyByHour || []).map((occ, h) => (
+                    <div
+                      key={h}
+                      className={`h-7 rounded ${heatColor(occ, cap)} transition-colors`}
+                      title={`${route.routeName} · ${h}:00 → ${occ} passengers (${cap > 0 ? Math.round((occ / cap) * 100) : 0}%)`}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+            {/* Legend */}
+            <div className="flex items-center gap-4 pt-2 text-xs text-text-secondary">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-crowd-low inline-block" /> Low</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-crowd-mod inline-block" /> Moderate</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-crowd-high inline-block" /> High</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-crowd-full inline-block" /> Full</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

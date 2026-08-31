@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
@@ -129,12 +130,36 @@ public class LocationService {
         if (currentIndex != -1) {
             remainingStops = stops.subList(currentIndex + 1, stops.size());
         }
-        
-        List<LiveTripStateDto.StopEtaDto> etas = etaService.calculateETA(lat, lon, remainingStops);
-        
+
+        long routeId = trip.getRoute().getId();
+        Long currentStopId = currentRouteStop != null ? currentRouteStop.getStop().getId() : null;
+        List<LiveTripStateDto.StopEtaDto> etas =
+                etaService.calculateETA(routeId, currentStopId, lat, lon, remainingStops);
+
         int maxCap = trip.getBus().getCapacity();
         int availSeats = Math.max(0, maxCap - trip.getCurrentOccupancy());
         String crowdLvl = predictionService.predictCrowdLevel(trip, availSeats, maxCap);
+
+        // Phase 8: attach ML-predicted occupancy to each upcoming stop, and derive
+        // a forward-looking crowd level for the next stop. Falls back gracefully
+        // (null predictions / live crowd label) when the model is not yet trained.
+        LocalDateTime now = LocalDateTime.now();
+        int hour = now.getHour();
+        int dow = now.getDayOfWeek().getValue();
+        Integer nextStopPredOcc = null;
+        for (int i = 0; i < etas.size(); i++) {
+            RouteStop rs = remainingStops.get(i);
+            Integer predOcc = predictionService.predictOccupancy(
+                    routeId, rs.getStop().getId(), rs.getStopOrder(), hour, dow, maxCap);
+            etas.get(i).setPredictedOccupancy(predOcc);
+            if (i == 0) {
+                nextStopPredOcc = predOcc;
+            }
+        }
+        boolean modelActive = predictionService.isModelActive();
+        String predictedCrowd = (nextStopPredOcc != null)
+                ? predictionService.crowdLevelFromOccupancy(nextStopPredOcc, maxCap)
+                : crowdLvl;
 
         return LiveTripStateDto.builder()
                 .tripId(trip.getId())
@@ -151,6 +176,8 @@ public class LocationService {
                 .currentOccupancy(trip.getCurrentOccupancy())
                 .availableSeats(availSeats)
                 .crowdLevel(crowdLvl)
+                .predictedCrowdLevel(predictedCrowd)
+                .modelActive(modelActive)
                 .remainingStopsEta(etas)
                 .timestamp(System.currentTimeMillis())
                 .build();

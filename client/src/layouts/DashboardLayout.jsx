@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { LayoutDashboard, Bus, Route as RouteIcon, MapPin, Users, LogOut, Map, Home as HomeIcon, LogIn, BarChart3 } from 'lucide-react'
+import { LayoutDashboard, Bus, Route as RouteIcon, MapPin, Users, LogOut, Map, Home as HomeIcon, LogIn, BarChart3, Brain } from 'lucide-react'
 
 const DashboardLayout = () => {
   const { user, logout } = useAuth()
@@ -26,6 +26,7 @@ const DashboardLayout = () => {
       { name: 'Stops', path: '/admin/stops', icon: MapPin },
       { name: 'Assign Conductors', path: '/admin/conductors', icon: Users },
       { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+      { name: 'Predictions', path: '/admin/predictions', icon: Brain },
     ]
   } else if (role === 'CONDUCTOR') {
     portalName = 'Ops Portal'

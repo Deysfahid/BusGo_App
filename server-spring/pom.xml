@@ -89,6 +89,22 @@
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>2.3.0</version>
 		</dependency>
+		<!-- Smile: pure-Java ML library used for the Phase 8 prediction layer
+		     (occupancy + segment-travel-time RandomForest regressors).
+		     2.6.x is the Java-17-compatible line (3.x targets Java 21).
+		     slf4j-simple is excluded so it does not clash with Spring Boot's
+		     logback binding (Smile ships slf4j-simple 1.7.30 as a transitive dep). -->
+		<dependency>
+			<groupId>com.github.haifengl</groupId>
+			<artifactId>smile-core</artifactId>
+			<version>2.6.0</version>
+			<exclusions>
+				<exclusion>
+					<groupId>org.slf4j</groupId>
+					<artifactId>slf4j-simple</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa-test</artifactId>

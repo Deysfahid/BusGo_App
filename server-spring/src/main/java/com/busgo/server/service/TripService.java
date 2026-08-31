@@ -1,10 +1,15 @@
 package com.busgo.server.service;
 
+import com.busgo.server.entity.OccupancySample;
 import com.busgo.server.entity.RouteStop;
+import com.busgo.server.entity.Stop;
 import com.busgo.server.entity.Ticket;
+import com.busgo.server.entity.TravelSample;
 import com.busgo.server.entity.Trip;
+import com.busgo.server.repository.OccupancySampleRepository;
 import com.busgo.server.repository.RouteStopRepository;
 import com.busgo.server.repository.TicketRepository;
+import com.busgo.server.repository.TravelSampleRepository;
 import com.busgo.server.repository.TripRepository;
 import com.busgo.server.repository.BusRepository;
 import com.busgo.server.repository.RouteRepository;
@@ -14,7 +19,9 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 @Service
@@ -27,6 +34,10 @@ public class TripService {
     private final BusRepository busRepository;
     private final RouteRepository routeRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final OccupancySampleRepository occupancySampleRepository;
+    private final TravelSampleRepository travelSampleRepository;
+    private final TripTimingTracker tripTimingTracker;
+    private final ETAService etaService;
     
     @org.springframework.context.annotation.Lazy
     @org.springframework.beans.factory.annotation.Autowired
@@ -67,6 +78,8 @@ public class TripService {
         }
         
         Trip savedTrip = tripRepository.save(trip);
+        // Phase 8: seed the segment timer at the origin stop (trip start = arrival at stop 0).
+        tripTimingTracker.markArrival(savedTrip.getId(), Instant.now());
         broadcastTripUpdate(savedTrip);
         return savedTrip;
     }
@@ -76,14 +89,15 @@ public class TripService {
         Trip trip = getTripById(tripId);
         trip.setStatus("active");
         trip.setStartTime(LocalDateTime.now());
-        
+
         // Find the first stop of the route
         List<RouteStop> stops = routeStopRepository.findByRouteIdOrderByStopOrderAsc(trip.getRoute().getId());
         if (!stops.isEmpty()) {
             trip.setCurrentStopId(stops.get(0).getStop().getId());
         }
-        
+
         Trip savedTrip = tripRepository.save(trip);
+        tripTimingTracker.markArrival(savedTrip.getId(), Instant.now());
         broadcastTripUpdate(savedTrip);
         return savedTrip;
     }
@@ -94,6 +108,7 @@ public class TripService {
         trip.setStatus("completed");
         trip.setEndTime(LocalDateTime.now());
         trip.setCurrentOccupancy(0);
+        tripTimingTracker.clear(tripId);
         
         // Complete any active tickets
         List<Ticket> activeTickets = ticketRepository.findByTripId(tripId).stream()
@@ -149,11 +164,64 @@ public class TripService {
             int newOccupancy = trip.getCurrentOccupancy() - alightingCount;
             if (newOccupancy < 0) newOccupancy = 0;
             trip.setCurrentOccupancy(newOccupancy);
+
+            // Phase 8: capture real training data for the reached segment/stop.
+            recordArrivalSamples(trip, stops.get(currentIndex).getStop(),
+                    stops.get(currentIndex + 1).getStop(), newOccupancy);
         }
 
         Trip savedTrip = tripRepository.save(trip);
         broadcastTripUpdate(savedTrip);
         return savedTrip;
+    }
+
+    /**
+     * On a real stop arrival, record (a) the observed occupancy at the reached
+     * stop and (b) the measured travel time for the segment just completed.
+     * Best-effort: never let sampling break the automatic-advance flow.
+     */
+    private void recordArrivalSamples(Trip trip, Stop fromStop, Stop toStop, int occupancy) {
+        try {
+            Long routeId = trip.getRoute().getId();
+            LocalDateTime now = LocalDateTime.now();
+            int stopOrder = routeStopRepository.findByRouteIdAndStopId(routeId, toStop.getId())
+                    .map(RouteStop::getStopOrder).orElse(0);
+
+            occupancySampleRepository.save(OccupancySample.builder()
+                    .routeId(routeId)
+                    .stopId(toStop.getId())
+                    .stopOrder(stopOrder)
+                    .hourOfDay(now.getHour())
+                    .dayOfWeek(now.getDayOfWeek().getValue())
+                    .occupancy(occupancy)
+                    .synthetic(false)
+                    .build());
+
+            Instant arrivedNow = Instant.now();
+            Instant prevArrival = tripTimingTracker.markArrival(trip.getId(), arrivedNow);
+            if (prevArrival != null
+                    && fromStop.getLatitude() != null && fromStop.getLongitude() != null
+                    && toStop.getLatitude() != null && toStop.getLongitude() != null) {
+                long travelSeconds = ChronoUnit.SECONDS.between(prevArrival, arrivedNow);
+                if (travelSeconds >= 1 && travelSeconds <= 6 * 3600) { // sanity bounds
+                    double distKm = etaService.calculateDistance(
+                            fromStop.getLatitude(), fromStop.getLongitude(),
+                            toStop.getLatitude(), toStop.getLongitude());
+                    travelSampleRepository.save(TravelSample.builder()
+                            .routeId(routeId)
+                            .fromStopId(fromStop.getId())
+                            .toStopId(toStop.getId())
+                            .distanceKm(distKm)
+                            .hourOfDay(now.getHour())
+                            .dayOfWeek(now.getDayOfWeek().getValue())
+                            .travelSeconds((int) travelSeconds)
+                            .synthetic(false)
+                            .build());
+                }
+            }
+        } catch (Exception ignored) {
+            // non-fatal
+        }
     }
 
     public void broadcastTripUpdate(Trip trip) {

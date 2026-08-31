@@ -47,6 +47,12 @@ public class AdminController {
         return ResponseEntity.ok(ApiResponse.success(adminService.getAnalyticsReports()));
     }
 
+    // --- PHASE 8: ML PREDICTIONS SUMMARY ---
+    @GetMapping("/predictions/summary")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getPredictionsSummary() {
+        return ResponseEntity.ok(ApiResponse.success(adminService.getPredictionsSummary()));
+    }
+
     // --- BUSES CRUD ---
     @GetMapping("/buses")
     public ResponseEntity<ApiResponse<List<Bus>>> getAllBuses() {

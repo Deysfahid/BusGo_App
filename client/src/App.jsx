@@ -36,6 +36,7 @@ function App() {
             <Route path="/admin/stops" element={<AdminDashboard />} />
             <Route path="/admin/conductors" element={<AdminDashboard />} />
             <Route path="/admin/analytics" element={<AdminDashboard />} />
+            <Route path="/admin/predictions" element={<AdminDashboard />} />
          </Route>
       </Route>
 

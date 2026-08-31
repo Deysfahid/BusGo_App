@@ -2,23 +2,32 @@ package com.busgo.server.service;
 
 import com.busgo.server.entity.Bus;
 import com.busgo.server.entity.Role;
+import com.busgo.server.entity.Route;
+import com.busgo.server.entity.RouteStop;
 import com.busgo.server.entity.Stop;
 import com.busgo.server.entity.Ticket;
 import com.busgo.server.entity.Trip;
 import com.busgo.server.entity.User;
 import com.busgo.server.exception.ResourceNotFoundException;
 import com.busgo.server.repository.BusRepository;
+import com.busgo.server.repository.OccupancySampleRepository;
 import com.busgo.server.repository.RouteRepository;
 import com.busgo.server.repository.RouteStopRepository;
 import com.busgo.server.repository.StopRepository;
 import com.busgo.server.repository.TicketRepository;
+import com.busgo.server.repository.TravelSampleRepository;
 import com.busgo.server.repository.TripRepository;
 import com.busgo.server.repository.UserRepository;
+import com.busgo.server.service.ml.EtaModel;
+import com.busgo.server.service.ml.ModelTrainingService;
+import com.busgo.server.service.ml.OccupancyModel;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +45,12 @@ public class AdminService {
     private final TicketRepository ticketRepository;
     private final StopRepository stopRepository;
     private final RouteStopRepository routeStopRepository;
+    private final OccupancySampleRepository occupancySampleRepository;
+    private final TravelSampleRepository travelSampleRepository;
+    private final ModelTrainingService modelTrainingService;
+    private final OccupancyModel occupancyModel;
+    private final EtaModel etaModel;
+    private final PredictionService predictionService;
 
     // The schema has no per-ticket fare, so revenue is derived from real ticket
     // volume using a single flat fare rather than a hard-coded figure.
@@ -117,6 +132,71 @@ public class AdminService {
                 .limit(n)
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
                         (a, b) -> a, LinkedHashMap::new));
+    }
+
+    // --- Phase 8: ML predictions summary (route x hour occupancy grid + metrics) ---
+
+    private static final int SUMMARY_NOMINAL_CAPACITY = 50; // clamp for admin display (no specific bus)
+    private static final int SUMMARY_DAY_OF_WEEK = 2;        // representative weekday (Tuesday)
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getPredictionsSummary() {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("modelActive", occupancyModel.isReady());
+        summary.put("etaModelActive", etaModel.isReady());
+        Instant trainedAt = modelTrainingService.getLastTrainedAt();
+        summary.put("lastTrainedAt", trainedAt != null ? trainedAt.toString() : null);
+        summary.put("occupancyRmse", round1(occupancyModel.getRmse()));
+        summary.put("etaRmse", round1(etaModel.getRmse()));
+        summary.put("occupancySampleCount", occupancySampleRepository.count());
+        summary.put("travelSampleCount", travelSampleRepository.count());
+        summary.put("representativeDayOfWeek", SUMMARY_DAY_OF_WEEK);
+        summary.put("nominalCapacity", SUMMARY_NOMINAL_CAPACITY);
+
+        List<Map<String, Object>> routes = new ArrayList<>();
+        for (Route route : routeRepository.findAll()) {
+            List<RouteStop> stops = routeStopRepository.findByRouteIdOrderByStopOrderAsc(route.getId());
+            if (stops.isEmpty()) continue;
+
+            // Average predicted occupancy across the route's stops, per hour of day.
+            int[] occupancyByHour = new int[24];
+            for (int hour = 0; hour < 24; hour++) {
+                double sum = 0;
+                int counted = 0;
+                for (RouteStop rs : stops) {
+                    Integer pred = predictionService.predictOccupancy(
+                            route.getId(), rs.getStop().getId(), rs.getStopOrder(),
+                            hour, SUMMARY_DAY_OF_WEEK, SUMMARY_NOMINAL_CAPACITY);
+                    if (pred != null) {
+                        sum += pred;
+                        counted++;
+                    }
+                }
+                occupancyByHour[hour] = counted > 0 ? (int) Math.round(sum / counted) : 0;
+            }
+
+            List<Map<String, Object>> stopList = new ArrayList<>();
+            for (RouteStop rs : stops) {
+                Map<String, Object> s = new LinkedHashMap<>();
+                s.put("stopId", rs.getStop().getId());
+                s.put("stopName", rs.getStop().getName());
+                s.put("stopOrder", rs.getStopOrder());
+                stopList.add(s);
+            }
+
+            Map<String, Object> routeMap = new LinkedHashMap<>();
+            routeMap.put("routeId", route.getId());
+            routeMap.put("routeName", route.getName());
+            routeMap.put("occupancyByHour", occupancyByHour);
+            routeMap.put("stops", stopList);
+            routes.add(routeMap);
+        }
+        summary.put("routes", routes);
+        return summary;
+    }
+
+    private double round1(double v) {
+        return Math.round(v * 10.0) / 10.0;
     }
 
     // --- Guarded deletes ---

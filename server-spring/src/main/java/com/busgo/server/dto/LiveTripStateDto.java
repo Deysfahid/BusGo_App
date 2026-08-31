@@ -33,13 +33,17 @@ public class LiveTripStateDto {
     private Integer availableSeats;
     
     // Prediction & Crowd
-    private String crowdLevel; // LOW, MEDIUM, HIGH, FULL
-    
+    private String crowdLevel; // LOW, MEDIUM, HIGH, FULL (live, from current occupancy)
+
+    // --- Phase 8 ML additions (additive; safe for existing consumers) ---
+    private String predictedCrowdLevel; // forward-looking crowd at the next stop, from the ML occupancy model
+    private Boolean modelActive;        // true when the trained ML model served these predictions (else heuristic)
+
     // ETA (for remaining stops)
     private List<StopEtaDto> remainingStopsEta;
-    
+
     private Long timestamp;
-    
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -48,5 +52,6 @@ public class LiveTripStateDto {
         private Long stopId;
         private String stopName;
         private Integer estimatedMinutes;
+        private Integer predictedOccupancy; // Phase 8: ML-predicted occupancy at this upcoming stop (null if model cold)
     }
 }

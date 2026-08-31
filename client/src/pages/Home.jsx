@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { apiRequest } from '../lib/api'
-import { Search, MapPin, Clock, Navigation, Bus } from 'lucide-react'
+import { Search, MapPin, Clock, Navigation, Bus, Sparkles } from 'lucide-react'
 import { connectWebSocket, disconnectWebSocket } from '../lib/websocket'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -87,6 +87,16 @@ function Home() {
       case 'FULL': return { label: 'FULL', color: 'text-crowd-full', bg: 'bg-crowd-full' }
       default: return { label: 'LOW CROWD', color: 'text-crowd-low', bg: 'bg-crowd-low' }
     }
+  }
+
+  // Bucket a predicted occupancy count into the same crowd levels used live.
+  const crowdFromOccupancy = (occ, cap) => {
+    if (occ == null || !cap) return null
+    const frac = occ / cap
+    if (frac >= 0.9) return 'FULL'
+    if (frac >= 0.6) return 'HIGH'
+    if (frac >= 0.3) return 'MEDIUM'
+    return 'LOW'
   }
 
   const renderProgressBar = (occupancy, capacity, crowdLevel) => {
@@ -216,8 +226,17 @@ function Home() {
                   <p className="font-bold text-xl">{selectedTrip.liveState?.availableSeats !== undefined ? selectedTrip.liveState.availableSeats : (selectedTrip.bus?.capacity - selectedTrip.currentOccupancy)}</p>
                 </div>
                 <div className="bg-dark p-4 rounded-2xl border border-border-subtle">
-                  <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">Crowd Pred.</p>
-                  <p className="font-bold text-xl">{selectedTrip.liveState?.crowdLevel || 'LOW'}</p>
+                  <p className="text-xs text-text-secondary uppercase tracking-wider mb-1 flex items-center gap-1">
+                    Crowd Pred.
+                    {selectedTrip.liveState?.modelActive && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded">
+                        <Sparkles size={10} /> AI
+                      </span>
+                    )}
+                  </p>
+                  <p className={`font-bold text-xl ${getCrowdInfo(selectedTrip.liveState?.predictedCrowdLevel || selectedTrip.liveState?.crowdLevel || 'LOW').color}`}>
+                    {selectedTrip.liveState?.predictedCrowdLevel || selectedTrip.liveState?.crowdLevel || 'LOW'}
+                  </p>
                 </div>
                 <div className="bg-dark p-4 rounded-2xl border border-border-subtle">
                   <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">Next Stop</p>
@@ -227,7 +246,14 @@ function Home() {
 
               {/* ETA Timeline */}
               <div className="bg-dark rounded-3xl p-6 border border-border-subtle mb-4">
-                <h3 className="font-bold text-xl mb-4 flex items-center gap-2"><Clock size={20} className="text-accent" /> Live ETA Timeline</h3>
+                <h3 className="font-bold text-xl mb-4 flex items-center gap-2">
+                  <Clock size={20} className="text-accent" /> Live ETA Timeline
+                  {selectedTrip.liveState?.modelActive && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-accent bg-accent/10 px-2 py-0.5 rounded-full ml-1">
+                      <Sparkles size={12} /> AI predictions
+                    </span>
+                  )}
+                </h3>
                 
                 {!selectedTrip.liveState?.remainingStopsEta ? (
                   <div className="text-text-secondary p-4 text-center border border-dashed border-border-subtle rounded-xl">
@@ -235,19 +261,33 @@ function Home() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {selectedTrip.liveState.remainingStopsEta.map((eta) => (
+                    {selectedTrip.liveState.remainingStopsEta.map((eta) => {
+                      const cap = selectedTrip.liveState?.maxCapacity || selectedTrip.bus?.capacity || 50
+                      const predLevel = crowdFromOccupancy(eta.predictedOccupancy, cap)
+                      const predCrowd = predLevel ? getCrowdInfo(predLevel) : null
+                      return (
                       <div key={eta.stopId} className="flex items-center justify-between bg-card p-3 rounded-xl border border-border-subtle">
                         <div className="flex items-center gap-3">
                            <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center">
                               <MapPin size={16} className="text-accent" />
                            </div>
-                           <h4 className="font-bold">{eta.stopName}</h4>
+                           <div>
+                             <h4 className="font-bold">{eta.stopName}</h4>
+                             {predCrowd && (
+                               <span className="flex items-center gap-1.5 mt-1 text-xs text-text-secondary">
+                                 <span className={`w-2 h-2 rounded-full ${predCrowd.bg} inline-block`} />
+                                 <span className={`font-semibold ${predCrowd.color}`}>~{eta.predictedOccupancy}</span>
+                                 <span>expected on board</span>
+                               </span>
+                             )}
+                           </div>
                         </div>
                         <span className={`px-3 py-1 rounded-lg text-sm font-bold ${eta.estimatedMinutes <= 5 ? 'bg-green-500/20 text-green-400' : 'bg-hover text-text-secondary'}`}>
                           {eta.estimatedMinutes} min
                         </span>
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>
