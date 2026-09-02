@@ -83,14 +83,29 @@ The Spring Boot application is configured to connect to PostgreSQL at:
 jdbc:postgresql://localhost:5432/busgo_dev
 ```
 
-Default database credentials in the application configuration are:
+### Configuring credentials
 
-```text
-username: postgres
-password: Balenozxi@69
+Database and JWT secrets are **not** stored in the repository. Copy the example file
+and fill in your own local values:
+
+```bash
+cd server-spring && cp secrets.properties.example secrets.properties
 ```
 
-> If you are running this project in a different environment, update the database settings in `server-spring/src/main/resources/application.yml`.
+`secrets.properties` is gitignored. It sets:
+
+```text
+DB_URL          jdbc:postgresql://localhost:5432/busgo_dev
+DB_USERNAME     postgres
+DB_PASSWORD     your local postgres password
+APP_JWT_SECRET  a random string of at least 32 characters
+```
+
+Generate a JWT secret with `openssl rand -hex 32`.
+
+> In production these are supplied as environment variables (for example in the
+> Render dashboard) rather than through the file, and environment variables take
+> precedence if both are present.
 
 ## Running the App
 

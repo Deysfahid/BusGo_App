@@ -14,6 +14,7 @@ import java.util.List;
 public class LiveTripStateDto {
     private Long tripId;
     private Long busId;
+    private String busNumber;
     private String routeName;
     private String status; // active, completed
     

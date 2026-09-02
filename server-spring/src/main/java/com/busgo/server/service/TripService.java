@@ -15,6 +15,8 @@ import com.busgo.server.repository.BusRepository;
 import com.busgo.server.repository.RouteRepository;
 import com.busgo.server.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +29,8 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class TripService {
+
+    private static final Logger log = LoggerFactory.getLogger(TripService.class);
 
     private final TripRepository tripRepository;
     private final TicketRepository ticketRepository;
@@ -80,6 +84,11 @@ public class TripService {
         Trip savedTrip = tripRepository.save(trip);
         // Phase 8: seed the segment timer at the origin stop (trip start = arrival at stop 0).
         tripTimingTracker.markArrival(savedTrip.getId(), Instant.now());
+        // Drop any dwell timer left over from a previous trip on this bus, otherwise
+        // its stale entry time would satisfy the dwell check on the very first ping.
+        locationService.clearGeofenceState(bus.getId(), savedTrip.getId());
+        log.info("[TRIP] Created trip {} for bus {} on route {} starting at stopId={}",
+                savedTrip.getId(), bus.getId(), route.getId(), savedTrip.getCurrentStopId());
         broadcastTripUpdate(savedTrip);
         return savedTrip;
     }
@@ -98,6 +107,9 @@ public class TripService {
 
         Trip savedTrip = tripRepository.save(trip);
         tripTimingTracker.markArrival(savedTrip.getId(), Instant.now());
+        // Reset the dwell timer only; the last known position stays cached so the
+        // broadcast below keeps the marker where the bus actually is.
+        locationService.clearGeofenceState(savedTrip.getBus().getId(), null);
         broadcastTripUpdate(savedTrip);
         return savedTrip;
     }
@@ -121,6 +133,8 @@ public class TripService {
         
         Trip savedTrip = tripRepository.save(trip);
         broadcastTripUpdate(savedTrip);
+        // Cleared after the final broadcast so it still carries the last known position.
+        locationService.clearGeofenceState(savedTrip.getBus().getId(), tripId);
         return savedTrip;
     }
 
@@ -145,14 +159,20 @@ public class TripService {
             }
         }
 
-        if (currentIndex != -1 && currentIndex < stops.size() - 1) {
-            // Move to next stop
-            Long nextStopId = stops.get(currentIndex + 1).getStop().getId();
+        // The stop we are arriving at. currentIndex == -1 means the trip has no
+        // valid current stop yet (null or stale currentStopId), in which case the
+        // first stop of the route is the one being reached - without this the
+        // advance silently no-ops and the trip never progresses.
+        int arrivedIndex = currentIndex + 1;
+
+        if (arrivedIndex <= stops.size() - 1) {
+            Stop arrivedStop = stops.get(arrivedIndex).getStop();
+            Long nextStopId = arrivedStop.getId();
             trip.setCurrentStopId(nextStopId);
 
             // Auto-decrement passengers whose destination is this next stop
             List<Ticket> alightingTickets = ticketRepository.findByTripIdAndToStopIdAndStatus(trip.getId(), nextStopId, "ACTIVE");
-            
+
             int alightingCount = 0;
             for (Ticket ticket : alightingTickets) {
                 alightingCount += ticket.getPassengerCount();
@@ -161,13 +181,21 @@ public class TripService {
             ticketRepository.saveAll(alightingTickets);
 
             // Update occupancy
-            int newOccupancy = trip.getCurrentOccupancy() - alightingCount;
+            int previousOccupancy = trip.getCurrentOccupancy();
+            int newOccupancy = previousOccupancy - alightingCount;
             if (newOccupancy < 0) newOccupancy = 0;
             trip.setCurrentOccupancy(newOccupancy);
 
+            log.info("[ADVANCE] trip={} arrived at '{}' (stopId={}): {} alighting ticket(s), {} passenger(s) off, occupancy {} -> {}",
+                    trip.getId(), arrivedStop.getName(), nextStopId,
+                    alightingTickets.size(), alightingCount, previousOccupancy, newOccupancy);
+
             // Phase 8: capture real training data for the reached segment/stop.
-            recordArrivalSamples(trip, stops.get(currentIndex).getStop(),
-                    stops.get(currentIndex + 1).getStop(), newOccupancy);
+            Stop fromStop = (currentIndex >= 0) ? stops.get(currentIndex).getStop() : null;
+            recordArrivalSamples(trip, fromStop, arrivedStop, newOccupancy);
+        } else {
+            log.info("[ADVANCE] trip={} is already at the final stop (stopId={}) - nothing to advance",
+                    trip.getId(), trip.getCurrentStopId());
         }
 
         Trip savedTrip = tripRepository.save(trip);
@@ -178,6 +206,8 @@ public class TripService {
     /**
      * On a real stop arrival, record (a) the observed occupancy at the reached
      * stop and (b) the measured travel time for the segment just completed.
+     * {@code fromStop} is null when the arrival is the trip's very first stop,
+     * in which case no segment sample is recorded.
      * Best-effort: never let sampling break the automatic-advance flow.
      */
     private void recordArrivalSamples(Trip trip, Stop fromStop, Stop toStop, int occupancy) {
@@ -199,7 +229,7 @@ public class TripService {
 
             Instant arrivedNow = Instant.now();
             Instant prevArrival = tripTimingTracker.markArrival(trip.getId(), arrivedNow);
-            if (prevArrival != null
+            if (prevArrival != null && fromStop != null
                     && fromStop.getLatitude() != null && fromStop.getLongitude() != null
                     && toStop.getLatitude() != null && toStop.getLongitude() != null) {
                 long travelSeconds = ChronoUnit.SECONDS.between(prevArrival, arrivedNow);

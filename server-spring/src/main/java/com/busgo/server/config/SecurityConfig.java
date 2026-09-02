@@ -26,6 +26,10 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
+// Activates the @PreAuthorize annotations already present on AdminController.
+// Without this they are inert, leaving every /api/admin/** endpoint reachable by
+// any authenticated user (a conductor, or a self-registered passenger).
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -42,7 +46,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/health/**").permitAll()
                 .requestMatchers("/ws/**").permitAll() // WebSocket
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/buses/**", "/api/routes/**", "/api/stops/**", "/api/trips/active").permitAll()
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/buses/**", "/api/routes/**", "/api/stops/**", "/api/trips/active", "/api/trips/*/live").permitAll()
                 .anyRequest().authenticated()
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -72,7 +76,15 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:5173","http://localhost:5174","http://localhost:5175","http://localhost:5176","https://busgo-frontend-sdyc.onrender.com"));
+        // Patterns rather than exact origins so a phone on the same Wi-Fi can call
+        // the API at http://<laptop-lan-ip>:8080 during real-GPS testing.
+        // Private ranges only - this never opens the API to the public internet.
+        configuration.setAllowedOriginPatterns(List.of(
+                "http://localhost:[*]",
+                "http://127.0.0.1:[*]",
+                "http://192.168.*.*:[*]",
+                "http://10.*.*.*:[*]",
+                "https://busgo-frontend-sdyc.onrender.com"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         configuration.setAllowCredentials(true);

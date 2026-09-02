@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { apiRequest } from '../lib/api'
+import { connectWebSocket, disconnectWebSocket } from '../lib/websocket'
 import { Bus, Route as RouteIcon, MapPin, Users, Ticket, TrendingUp, DollarSign, Plus, Search, Trash2, Brain, Clock, Activity } from 'lucide-react'
 
 export default function AdminDashboard() {
@@ -43,6 +44,7 @@ export default function AdminDashboard() {
 function OverviewTab() {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [liveCount, setLiveCount] = useState(null)
 
   useEffect(() => {
     apiRequest('/api/admin/stats')
@@ -56,7 +58,9 @@ function OverviewTab() {
 
   const cards = [
     { title: 'Total Buses', value: stats.totalBuses, icon: Bus, color: 'text-accent', bg: 'bg-accent/10' },
-    { title: 'Active Trips', value: stats.activeTrips, icon: TrendingUp, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
+    // Live count wins once the fleet panel below has its data, so this card
+    // does not go stale while trips start and end.
+    { title: 'Active Trips', value: liveCount ?? stats.activeTrips, icon: TrendingUp, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
     { title: 'Routes', value: stats.totalRoutes, icon: RouteIcon, color: 'text-purple-400', bg: 'bg-purple-400/10' },
     { title: 'Assign Conductors', value: stats.totalConductors, icon: Users, color: 'text-orange-400', bg: 'bg-orange-400/10' },
     { title: 'Total Tickets', value: stats.totalTickets, icon: Ticket, color: 'text-pink-400', bg: 'bg-pink-400/10' },
@@ -85,6 +89,192 @@ function OverviewTab() {
           )
         })}
       </div>
+
+      <LiveFleetPanel onCountChange={setLiveCount} />
+    </div>
+  )
+}
+
+/**
+ * Live fleet view. Subscribes to the same `/topic/bus-updates` broadcast the
+ * passenger view uses, so the admin sees stop progression, occupancy and crowd
+ * change as buses move, without reloading the page.
+ */
+function LiveFleetPanel({ onCountChange }) {
+  const [fleet, setFleet] = useState({})   // tripId -> { busId, busNumber, routeName, live }
+  const [now, setNow] = useState(() => Date.now())
+  const [connected, setConnected] = useState(false)
+
+  // Ticks the "last update" ages so a bus that stops reporting is obvious.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    let lastRefetch = 0
+
+    // Seed from REST so buses already running appear before their next ping.
+    const loadActive = async () => {
+      try {
+        const res = await apiRequest('/api/trips/active')
+        if (cancelled) return
+        setFleet(prev => {
+          const next = { ...prev }
+          for (const t of res.data || []) {
+            next[t.id] = {
+              busId: t.bus?.id,
+              busNumber: t.bus?.busNumber,
+              routeName: t.route?.name,
+              capacity: t.bus?.capacity,
+              live: prev[t.id]?.live ?? null,
+            }
+          }
+          return next
+        })
+      } catch (err) {
+        console.error(err)
+      }
+    }
+    loadActive()
+
+    connectWebSocket((stompClient) => {
+      if (cancelled) return
+      setConnected(true)
+      stompClient.subscribe('/topic/bus-updates', (msg) => {
+        if (!msg.body) return
+        const state = JSON.parse(msg.body)
+        if (!state.tripId) return
+
+        setFleet(prev => {
+          if (state.status === 'completed') {
+            const next = { ...prev }
+            delete next[state.tripId]
+            return next
+          }
+          const existing = prev[state.tripId]
+          // A trip we have never seen: pull its bus/route details once.
+          if (!existing && Date.now() - lastRefetch > 5000) {
+            lastRefetch = Date.now()
+            loadActive()
+          }
+          return {
+            ...prev,
+            [state.tripId]: {
+              busId: state.busId,
+              busNumber: existing?.busNumber,
+              routeName: state.routeName || existing?.routeName,
+              capacity: state.maxCapacity || existing?.capacity,
+              live: state,
+            },
+          }
+        })
+      })
+    })
+
+    return () => {
+      cancelled = true
+      disconnectWebSocket()
+    }
+  }, [])
+
+  const entries = Object.entries(fleet)
+
+  useEffect(() => {
+    onCountChange?.(entries.length)
+  }, [entries.length, onCountChange])
+
+  const crowdColor = (level) => {
+    switch (level) {
+      case 'MEDIUM': return 'text-crowd-mod'
+      case 'HIGH': return 'text-crowd-high'
+      case 'FULL': return 'text-crowd-full'
+      default: return 'text-crowd-low'
+    }
+  }
+  const crowdBg = (level) => {
+    switch (level) {
+      case 'MEDIUM': return 'bg-crowd-mod'
+      case 'HIGH': return 'bg-crowd-high'
+      case 'FULL': return 'bg-crowd-full'
+      default: return 'bg-crowd-low'
+    }
+  }
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center gap-3 mb-4">
+        <h3 className="text-xl font-bold">Live Fleet</h3>
+        <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded-full ${connected ? 'bg-emerald-400/10 text-emerald-400' : 'bg-red-400/10 text-red-400'}`}>
+          <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
+          {connected ? 'Live' : 'Connecting...'}
+        </span>
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="bg-card border border-border-subtle rounded-2xl p-8 text-center text-text-secondary">
+          No trips are running right now. Buses appear here as soon as a conductor starts a trip.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {entries.map(([tripId, item]) => {
+            const live = item.live
+            const cap = item.capacity || 50
+            const occ = live?.currentOccupancy ?? 0
+            const percent = Math.min(100, Math.round((occ / cap) * 100))
+            const level = live?.crowdLevel || 'LOW'
+            // Clamped: the server stamps the time, so a small clock skew between
+            // machines can otherwise render a negative age.
+            const ageSec = live?.timestamp ? Math.max(0, Math.round((now - live.timestamp) / 1000)) : null
+            const stale = ageSec != null && ageSec > 15
+
+            return (
+              <div key={tripId} className="bg-card border border-border-subtle rounded-2xl p-5">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <span className="inline-block px-2 py-1 bg-accent/20 text-accent text-xs font-bold rounded mb-1">
+                      {item.busNumber || `Bus #${item.busId}`}
+                    </span>
+                    <h4 className="font-semibold">{item.routeName || 'Unknown route'}</h4>
+                  </div>
+                  <span className={`text-xs font-medium ${stale ? 'text-amber-400' : 'text-text-secondary'}`}>
+                    {ageSec == null ? 'awaiting GPS' : stale ? `no GPS for ${ageSec}s` : `${ageSec}s ago`}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 text-sm mb-4">
+                  <MapPin size={14} className="text-text-secondary shrink-0" />
+                  <span className="font-medium">{live?.currentStopName || '—'}</span>
+                  <span className="text-text-secondary">→</span>
+                  <span className="text-accent font-medium">{live?.nextStopName || 'end of route'}</span>
+                </div>
+
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-text-secondary flex items-center gap-2"><Users size={14} /> Occupancy</span>
+                  <span className={`font-bold ${crowdColor(level)}`}>
+                    {occ} <span className="text-text-secondary font-normal">/ {cap}</span>
+                    <span className="text-text-secondary font-normal"> · {live?.availableSeats ?? cap - occ} free</span>
+                  </span>
+                </div>
+                <div className="h-2 w-full bg-dark rounded-full overflow-hidden border border-border-subtle">
+                  <div className={`h-full ${crowdBg(level)} transition-all duration-500`} style={{ width: `${percent}%` }} />
+                </div>
+
+                <div className="flex items-center justify-between mt-3 text-xs">
+                  <span className={`font-semibold ${crowdColor(level)}`}>{level} CROWD</span>
+                  {live?.remainingStopsEta?.length > 0 && (
+                    <span className="text-text-secondary flex items-center gap-1">
+                      <Clock size={12} />
+                      {live.remainingStopsEta[0].stopName} in {live.remainingStopsEta[0].estimatedMinutes} min
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -376,8 +566,104 @@ function StopsTab() {
   const [stops, setStops] = useState([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [formData, setFormData] = useState({ name: '', latitude: '', longitude: '' })
-  
+  const [locating, setLocating] = useState(false)
+  const [locateError, setLocateError] = useState('')
+
+  // --- OpenStreetMap import (adds stop reference data; unrelated to live tracking) ---
+  const [osmOpen, setOsmOpen] = useState(false)
+  const [osmCentre, setOsmCentre] = useState({ lat: '', lon: '' })
+  const [osmRadius, setOsmRadius] = useState(2000)
+  const [osmFilter, setOsmFilter] = useState('')
+  const [osmResults, setOsmResults] = useState(null)
+  const [osmChosen, setOsmChosen] = useState({})
+  const [osmBusy, setOsmBusy] = useState(false)
+  const [osmError, setOsmError] = useState('')
+
+  const osmUseMyLocation = () => {
+    setOsmError('')
+    if (!('geolocation' in navigator)) { setOsmError('This browser has no location support.'); return }
+    setOsmBusy(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setOsmCentre({ lat: pos.coords.latitude.toFixed(6), lon: pos.coords.longitude.toFixed(6) })
+        setOsmBusy(false)
+      },
+      () => { setOsmError('Could not get a location fix. Location needs https (or localhost).'); setOsmBusy(false) },
+      { enableHighAccuracy: true, timeout: 15000 }
+    )
+  }
+
+  const osmSearch = async () => {
+    setOsmError(''); setOsmResults(null); setOsmChosen({})
+    if (!osmCentre.lat || !osmCentre.lon) { setOsmError('Set a centre point first.'); return }
+    setOsmBusy(true)
+    try {
+      const token = localStorage.getItem('busgo_token')
+      const params = new URLSearchParams({ lat: osmCentre.lat, lon: osmCentre.lon, radiusMeters: String(osmRadius) })
+      if (osmFilter.trim()) params.set('filter', osmFilter.trim())
+      const res = await apiRequest(`/api/admin/stops/osm-search?${params}`, { authToken: token })
+      setOsmResults(res.data || [])
+      // Pre-tick everything that isn't already stored.
+      const preset = {}
+      for (const s of res.data || []) if (!s.alreadyExists) preset[s.name] = true
+      setOsmChosen(preset)
+    } catch (err) {
+      setOsmError(err.message)
+    } finally {
+      setOsmBusy(false)
+    }
+  }
+
+  const osmImport = async () => {
+    const chosen = (osmResults || []).filter(s => osmChosen[s.name] && !s.alreadyExists)
+    if (chosen.length === 0) { setOsmError('Nothing selected to import.'); return }
+    setOsmBusy(true); setOsmError('')
+    try {
+      const token = localStorage.getItem('busgo_token')
+      const res = await apiRequest('/api/admin/stops/osm-import', {
+        method: 'POST', authToken: token, body: JSON.stringify(chosen),
+      })
+      setOsmOpen(false); setOsmResults(null); setOsmChosen({})
+      fetchStops()
+      alert(res.message || 'Stops imported')
+    } catch (err) {
+      setOsmError(err.message)
+    } finally {
+      setOsmBusy(false)
+    }
+  }
+
   const fetchStops = () => apiRequest('/api/admin/stops').then(res => setStops(res.data)).catch(console.error)
+
+  // Fill the coordinates from the device's GPS, so a stop can be added while
+  // standing at it instead of looking the numbers up.
+  const handleUseMyLocation = () => {
+    setLocateError('')
+    if (!('geolocation' in navigator)) {
+      setLocateError('This browser has no location support.')
+      return
+    }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setFormData(prev => ({
+          ...prev,
+          latitude: pos.coords.latitude.toFixed(6),
+          longitude: pos.coords.longitude.toFixed(6),
+        }))
+        setLocating(false)
+      },
+      (err) => {
+        setLocateError(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location permission denied.'
+            : 'Could not get a location fix. Location needs https (or localhost).'
+        )
+        setLocating(false)
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    )
+  }
 
   useEffect(() => {
     fetchStops()
@@ -419,9 +705,14 @@ function StopsTab() {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <h2 className="text-2xl font-bold">Stops</h2>
-        <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
-          <Plus size={18} /> Add Stop
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setOsmOpen(true)} className="flex items-center gap-2 bg-hover hover:bg-white/10 text-text-primary px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+            <MapPin size={18} /> Import from OpenStreetMap
+          </button>
+          <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+            <Plus size={18} /> Add Stop
+          </button>
+        </div>
       </div>
 
       <div className="bg-card border border-border-subtle rounded-2xl overflow-hidden">
@@ -442,7 +733,9 @@ function StopsTab() {
                     {s.name}
                   </td>
                   <td className="px-6 py-4 text-text-secondary">
-                    {s.latitude && s.longitude ? `${s.latitude}, ${s.longitude}` : 'Not provided'}
+                    {s.latitude && s.longitude
+                      ? `${s.latitude}, ${s.longitude}`
+                      : <span className="text-amber-400">Not provided &mdash; no geofence</span>}
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button onClick={() => handleDelete(s.id)} className="text-text-secondary hover:text-red-400 p-1 ml-2"><Trash2 size={16} /></button>
@@ -457,6 +750,88 @@ function StopsTab() {
         </div>
       </div>
 
+      <Modal isOpen={osmOpen} onClose={() => setOsmOpen(false)} title="Import stops from OpenStreetMap">
+        <div className="space-y-4">
+          <p className="text-xs text-text-secondary">
+            Pulls surveyed bus-stop positions from OpenStreetMap into your stop list.
+            This only adds stop reference data &mdash; live bus tracking is unaffected,
+            and existing stops are never modified.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Centre latitude</label>
+              <input type="number" step="any" value={osmCentre.lat} onChange={e => setOsmCentre({ ...osmCentre, lat: e.target.value })} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="12.9778" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Centre longitude</label>
+              <input type="number" step="any" value={osmCentre.lon} onChange={e => setOsmCentre({ ...osmCentre, lon: e.target.value })} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="77.5714" />
+            </div>
+          </div>
+
+          <button type="button" onClick={osmUseMyLocation} disabled={osmBusy} className="w-full flex items-center justify-center gap-2 bg-hover hover:bg-white/10 text-text-primary py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+            <MapPin size={16} /> Use my current location
+          </button>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Radius</label>
+              <select value={osmRadius} onChange={e => setOsmRadius(Number(e.target.value))} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none">
+                <option value={500}>500 m</option>
+                <option value={1000}>1 km</option>
+                <option value={2000}>2 km</option>
+                <option value={5000}>5 km</option>
+                <option value={10000}>10 km</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Name contains (optional)</label>
+              <input type="text" value={osmFilter} onChange={e => setOsmFilter(e.target.value)} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="e.g. TTMC" />
+            </div>
+          </div>
+
+          <button type="button" onClick={osmSearch} disabled={osmBusy} className="w-full bg-accent hover:bg-accent/90 text-white py-2.5 rounded-lg font-medium disabled:opacity-50">
+            {osmBusy ? 'Searching OpenStreetMap...' : 'Search'}
+          </button>
+
+          {osmError && <p className="text-xs text-red-400">{osmError}</p>}
+
+          {osmResults && (
+            <div>
+              <p className="text-xs text-text-secondary mb-2">
+                {osmResults.length} found &mdash; {osmResults.filter(s => !s.alreadyExists).length} new
+              </p>
+              <div className="max-h-64 overflow-y-auto border border-border-subtle rounded-xl divide-y divide-border-subtle">
+                {osmResults.length === 0 && (
+                  <p className="p-4 text-sm text-text-secondary text-center">No bus stops mapped in this area.</p>
+                )}
+                {osmResults.map(s => (
+                  <label key={s.name} className={`flex items-center gap-3 p-3 text-sm ${s.alreadyExists ? 'opacity-50' : 'cursor-pointer hover:bg-hover/40'}`}>
+                    <input
+                      type="checkbox"
+                      disabled={s.alreadyExists}
+                      checked={!!osmChosen[s.name] && !s.alreadyExists}
+                      onChange={e => setOsmChosen({ ...osmChosen, [s.name]: e.target.checked })}
+                      className="accent-accent w-4 h-4 shrink-0"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block font-medium truncate">{s.name}</span>
+                      <span className="block text-xs text-text-secondary">
+                        {s.latitude}, {s.longitude} · {s.distanceMeters} m away
+                        {s.alreadyExists && ' · already added'}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <button type="button" onClick={osmImport} disabled={osmBusy} className="w-full bg-accent hover:bg-accent/90 text-white py-2.5 rounded-lg font-medium mt-4 disabled:opacity-50">
+                Import selected
+              </button>
+            </div>
+          )}
+        </div>
+      </Modal>
+
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Create New Stop">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -465,14 +840,27 @@ function StopsTab() {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Latitude (Optional)</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Latitude</label>
               <input type="number" step="any" value={formData.latitude} onChange={e => setFormData({...formData, latitude: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="12.9778" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Longitude (Optional)</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Longitude</label>
               <input type="number" step="any" value={formData.longitude} onChange={e => setFormData({...formData, longitude: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="77.5714" />
             </div>
           </div>
+          <button
+            type="button"
+            onClick={handleUseMyLocation}
+            disabled={locating}
+            className="w-full flex items-center justify-center gap-2 bg-hover hover:bg-white/10 text-text-primary py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            <MapPin size={16} /> {locating ? 'Getting location...' : 'Use my current location'}
+          </button>
+          {locateError && <p className="text-xs text-red-400">{locateError}</p>}
+          <p className="text-xs text-text-secondary">
+            A stop without coordinates still appears on routes, but it cannot trigger the
+            GPS geofence, so buses will not auto-advance past it.
+          </p>
           <button type="submit" className="w-full bg-accent hover:bg-accent/90 text-white font-medium py-2.5 rounded-lg mt-6 transition-colors">
             Save Stop
           </button>

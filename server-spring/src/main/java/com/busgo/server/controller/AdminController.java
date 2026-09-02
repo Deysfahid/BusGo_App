@@ -1,6 +1,7 @@
 package com.busgo.server.controller;
 
 import com.busgo.server.dto.ApiResponse;
+import com.busgo.server.dto.OsmStopDto;
 import com.busgo.server.entity.Bus;
 import com.busgo.server.entity.Role;
 import com.busgo.server.entity.Route;
@@ -13,6 +14,7 @@ import com.busgo.server.repository.RouteStopRepository;
 import com.busgo.server.repository.StopRepository;
 import com.busgo.server.repository.UserRepository;
 import com.busgo.server.service.AdminService;
+import com.busgo.server.service.OsmStopImportService;
 import com.busgo.server.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -35,6 +37,7 @@ public class AdminController {
     private final RouteStopRepository routeStopRepository;
     private final StopRepository stopRepository;
     private final UserRepository userRepository;
+    private final OsmStopImportService osmStopImportService;
 
     // --- DASHBOARD STATS ---
     @GetMapping("/stats")
@@ -130,6 +133,31 @@ public class AdminController {
         routeStopRepository.save(stops.get(idx));
         routeStopRepository.save(stops.get(swapIdx));
         return ResponseEntity.ok(ApiResponse.success("Reordered"));
+    }
+
+    // --- OPENSTREETMAP STOP IMPORT (static reference data only) ---
+
+    /**
+     * Searches OpenStreetMap for real bus stops near a point. Read-only preview:
+     * nothing is written until the admin posts a selection to /stops/osm-import.
+     * Live bus tracking is untouched by this - it only supplies stop coordinates.
+     */
+    @GetMapping("/stops/osm-search")
+    public ResponseEntity<ApiResponse<List<OsmStopDto>>> searchOsmStops(
+            @RequestParam double lat,
+            @RequestParam double lon,
+            @RequestParam(defaultValue = "2000") int radiusMeters,
+            @RequestParam(required = false) String filter) {
+        return ResponseEntity.ok(ApiResponse.success(
+                osmStopImportService.findNearby(lat, lon, radiusMeters, filter)));
+    }
+
+    /** Creates the selected OSM stops. Existing stops are skipped, never overwritten. */
+    @PostMapping("/stops/osm-import")
+    public ResponseEntity<ApiResponse<List<Stop>>> importOsmStops(@RequestBody List<OsmStopDto> stops) {
+        List<Stop> created = osmStopImportService.importStops(stops);
+        return ResponseEntity.ok(ApiResponse.success(
+                created.size() + " stop(s) imported", created));
     }
 
     // --- STOPS CRUD ---

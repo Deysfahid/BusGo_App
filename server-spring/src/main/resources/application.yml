@@ -1,10 +1,20 @@
 spring:
   application:
     name: server
+
+  # Local development secrets live in server-spring/secrets.properties, which is
+  # gitignored and never committed. "optional:" means the app still starts when
+  # the file is absent - as it is in production, where the same values arrive as
+  # environment variables (which take precedence over imported config anyway).
+  config:
+    import: optional:file:./secrets.properties
+
   datasource:
-    url: jdbc:postgresql://localhost:5432/busgo_dev
-    username: postgres
-    password: Balenozxi@69
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/busgo_dev}
+    username: ${DB_USERNAME:postgres}
+    # No default: an unset password fails loudly rather than silently falling
+    # back to a value baked into a public repository.
+    password: ${DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -20,5 +30,7 @@ server:
 
 app:
   jwt:
-    secret: 9a4f2c8d3b7a1e6f45c8a0b3f267d8b1d4e6f3c8a9d2b5f8e3a9c8b5f6v8a3d9
-    expirationMs: 86400000 # 24 hours
+    # Must be at least 256 bits (32+ characters) for HS512; jjwt rejects
+    # anything weaker, so a missing value fails rather than degrading silently.
+    secret: ${APP_JWT_SECRET:}
+    expirationMs: ${APP_JWT_EXPIRATION_MS:86400000} # 24 hours

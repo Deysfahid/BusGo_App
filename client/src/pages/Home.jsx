@@ -36,7 +36,26 @@ function Home() {
     const fetchActiveTrips = async () => {
       try {
         const res = await apiRequest('/api/trips/active')
-        setActiveTrips(res.data || [])
+        const trips = res.data || []
+        setActiveTrips(trips)
+
+        // Seed each bus's last known position from the API, so a passenger who
+        // opens the app mid-trip sees the bus straight away instead of an empty
+        // map until the conductor's next ping arrives over the socket.
+        const states = await Promise.all(
+          trips.map((t) =>
+            apiRequest(`/api/trips/${t.id}/live`)
+              .then((r) => ({ id: t.id, live: r.data }))
+              .catch(() => null)
+          )
+        )
+        setActiveTrips((prev) =>
+          prev.map((t) => {
+            const seeded = states.find((s) => s && s.id === t.id)
+            // Never overwrite a fresher state that arrived over the socket first.
+            return seeded && !t.liveState ? { ...t, liveState: seeded.live } : t
+          })
+        )
       } catch (err) {
         console.error(err)
       }
