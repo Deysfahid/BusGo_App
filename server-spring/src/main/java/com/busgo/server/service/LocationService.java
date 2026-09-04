@@ -35,7 +35,7 @@ public class LocationService {
     private final TripRepository tripRepository;
     private final BusLocationRepository busLocationRepository;
 
-    @Value("${busgo.geofence.radius:100}")
+    @Value("${busgo.geofence.radius:175}")
     private double geofenceRadiusMeters;
 
     @Value("${busgo.geofence.dwell-seconds:3}")
@@ -44,7 +44,7 @@ public class LocationService {
     /**
      * Fixes less accurate than this (metres) still move the map marker but are
      * not trusted to change the current stop - a 500 m accuracy circle can sit
-     * "inside" a 100 m geofence while the bus is nowhere near the stop.
+     * "inside" the geofence while the bus is nowhere near the stop.
      */
     @Value("${busgo.geofence.max-accuracy-meters:250}")
     private double maxAccuracyMeters;
@@ -328,6 +328,7 @@ public class LocationService {
                 .tripId(trip.getId())
                 .busId(trip.getBus().getId())
                 .busNumber(trip.getBus().getBusNumber())
+                .routeId(trip.getRoute().getId())
                 .routeName(trip.getRoute().getName())
                 .status(trip.getStatus())
                 .currentLat(hasPosition ? lat : null)

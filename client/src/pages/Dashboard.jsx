@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Bus, Users, Navigation, Square, Ticket, Activity } from 'lucide-react'
+import { Bus, Users, Navigation, Square, Ticket } from 'lucide-react'
 import { MapContainer, TileLayer, Marker, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -438,46 +438,66 @@ export default function Dashboard() {
     }
   }
 
-  if (loading) return <div className="p-6 text-center text-text-secondary">Loading operations data...</div>
+  if (loading) {
+    return (
+      <div className="max-w-lg mx-auto p-5 space-y-4">
+        <div className="skeleton h-8 w-48" />
+        <div className="skeleton h-64 w-full" />
+      </div>
+    )
+  }
 
   if (!isTripStarted) {
     return (
-      <div className="max-w-md mx-auto space-y-6 animate-in fade-in">
-        <div className="bg-card border border-border-subtle rounded-3xl p-6 text-center shadow-soft">
-          <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Bus size={32} className="text-accent" />
+      <div className="p-5 sm:p-8">
+        <div className="max-w-md mx-auto">
+          <div className="mb-6">
+            <p className="eyebrow mb-1">Conductor</p>
+            <h1 className="page-title">Start a trip</h1>
+            <p className="text-sm text-text-secondary mt-1">
+              Choose your bus and route to begin operations.
+            </p>
           </div>
-          <h2 className="text-2xl font-bold mb-2">Start a Trip</h2>
-          <p className="text-text-secondary text-sm mb-6">Select your bus and route to begin operations.</p>
-          
-          <select 
-            className="w-full bg-dark border border-border-subtle rounded-xl py-4 px-4 text-text-primary focus:outline-none focus:border-accent mb-3 appearance-none"
-            value={activeBusId}
-            onChange={(e) => setActiveBusId(e.target.value)}
-          >
-            <option value="" className="bg-dark text-text-primary">Select assigned bus...</option>
-            {buses.map(b => (
-              <option key={b.id} value={b.id} className="bg-dark text-text-primary">{b.busNumber}</option>
-            ))}
-          </select>
 
-          <select 
-            className="w-full bg-dark border border-border-subtle rounded-xl py-4 px-4 text-text-primary focus:outline-none focus:border-accent mb-4 appearance-none"
-            value={activeRouteId}
-            onChange={(e) => setActiveRouteId(e.target.value)}
-          >
-            <option value="" className="bg-dark text-text-primary">Select route...</option>
-            {routes.map(r => (
-              <option key={r.id} value={r.id} className="bg-dark text-text-primary">Route {r.name}</option>
-            ))}
-          </select>
-          <button 
-            disabled={!activeBusId || !activeRouteId}
-            onClick={handleStartTrip} 
-            className="w-full bg-accent text-white py-4 rounded-xl font-bold text-lg disabled:opacity-50 transition-all hover:bg-accent/90"
-          >
-            START TRIP
-          </button>
+          <div className="card-pad space-y-5">
+            <div>
+              <label htmlFor="bus-select" className="label">Assigned bus</label>
+              <select
+                id="bus-select"
+                className="select"
+                value={activeBusId}
+                onChange={(e) => setActiveBusId(e.target.value)}
+              >
+                <option value="" className="bg-dark text-text-primary">Select assigned bus...</option>
+                {buses.map(b => (
+                  <option key={b.id} value={b.id} className="bg-dark text-text-primary">{b.busNumber}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="route-select" className="label">Route</label>
+              <select
+                id="route-select"
+                className="select"
+                value={activeRouteId}
+                onChange={(e) => setActiveRouteId(e.target.value)}
+              >
+                <option value="" className="bg-dark text-text-primary">Select route...</option>
+                {routes.map(r => (
+                  <option key={r.id} value={r.id} className="bg-dark text-text-primary">Route {r.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              disabled={!activeBusId || !activeRouteId}
+              onClick={handleStartTrip}
+              className="btn-primary btn-block min-h-[52px] text-base"
+            >
+              <Bus size={19} /> Start trip
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -501,49 +521,67 @@ export default function Dashboard() {
   const nextStopName = liveTripState?.nextStopName || (liveTripState ? 'End of route' : 'Detecting...')
 
   // Green only when a real fix is flowing; amber for degraded but usable.
-  const gpsTone =
-    gpsStatus === GPS_CONNECTED || gpsStatus === GPS_SIM
-      ? 'bg-green-500/10 text-green-500'
-      : gpsStatus === GPS_SEARCHING || gpsStatus === GPS_POOR || gpsStatus === GPS_STALE
-        ? 'bg-amber-500/10 text-amber-400'
-        : 'bg-red-500/10 text-red-400'
+  const gpsHealthy = gpsStatus === GPS_CONNECTED || gpsStatus === GPS_SIM
+  const gpsWarn = gpsStatus === GPS_SEARCHING || gpsStatus === GPS_POOR || gpsStatus === GPS_STALE
+  const gpsTone = gpsHealthy ? 'text-live' : gpsWarn ? 'text-stale' : 'text-danger'
+  const gpsDotTone = gpsHealthy ? 'bg-live' : gpsWarn ? 'bg-stale' : 'bg-danger'
+  const gpsHint =
+    gpsStatus === GPS_DENIED ? 'Allow location for this site in your browser settings, then reload.'
+    : gpsStatus === GPS_INSECURE ? 'Browsers only give GPS over https:// or localhost.'
+    : gpsStatus === GPS_POOR ? 'Position shown, but too coarse to confirm a stop arrival.'
+    : null
 
   return (
-    <div className="max-w-md mx-auto space-y-4 animate-in fade-in pb-12 relative">
-      {/* Simulation Toggle and GPS Status */}
-      <div className="flex flex-col gap-3">
-        {/* GPS Status Indicator */}
-        <div className={`flex flex-col items-center p-3 rounded-2xl font-bold tracking-wide transition-colors ${gpsTone}`}>
-           <div className="flex items-center">
-             <Navigation size={18} className="mr-2" />
-             GPS ● {gpsStatus}
-           </div>
-           {gpsFix && (
-             <div className="mt-1 text-xs font-normal opacity-80">
-               {gpsFix.lat.toFixed(5)}, {gpsFix.lon.toFixed(5)}
-               {gpsFix.accuracy != null && ` · ±${Math.round(gpsFix.accuracy)}m`}
-             </div>
-           )}
-           {gpsStatus === GPS_DENIED && (
-             <div className="mt-1 text-xs font-normal opacity-80">
-               Allow location for this site in your browser settings, then reload.
-             </div>
-           )}
-           {gpsStatus === GPS_INSECURE && (
-             <div className="mt-1 text-xs font-normal opacity-80">
-               Browsers only give GPS over https:// or localhost.
-             </div>
-           )}
-           {gpsStatus === GPS_POOR && (
-             <div className="mt-1 text-xs font-normal opacity-80">
-               Position shown, but too coarse to confirm a stop arrival.
-             </div>
-           )}
+    <div className="p-4 sm:p-6 pb-12">
+      <div className="max-w-lg mx-auto space-y-4">
+
+        {/* --- Mode banner: never leave any doubt which source is driving the bus --- */}
+        <div className={`card p-4 border-l-4 ${simulationMode ? 'border-l-stale' : 'border-l-accent'}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`status-dot ${simulationMode ? 'bg-stale' : gpsDotTone} ${gpsHealthy && !simulationMode ? 'pulse-live' : ''}`} />
+                <span className="font-bold tracking-tight">
+                  {simulationMode ? 'Simulation mode' : 'Live GPS'}
+                </span>
+              </div>
+              <p className={`text-sm font-medium ${gpsTone}`}>
+                <Navigation size={13} className="inline mr-1.5 -mt-0.5" />
+                {gpsStatus}
+              </p>
+              {gpsFix && (
+                <p className="mt-1 text-xs text-text-muted numeric">
+                  {gpsFix.lat.toFixed(5)}, {gpsFix.lon.toFixed(5)}
+                  {gpsFix.accuracy != null && ` · ±${Math.round(gpsFix.accuracy)}m`}
+                </p>
+              )}
+              {gpsHint && <p className="mt-1.5 text-xs text-text-secondary">{gpsHint}</p>}
+              {simulationMode && (
+                <p className="mt-1.5 text-xs text-text-secondary">
+                  Position is simulated for testing — the device GPS is not in use.
+                </p>
+              )}
+            </div>
+
+            {/* Simulation toggle */}
+            <div className="shrink-0 text-right">
+              <span className="eyebrow block mb-2">Simulate</span>
+              <button
+                onClick={() => setSimulationMode(!simulationMode)}
+                role="switch"
+                aria-checked={simulationMode}
+                aria-label="Simulation mode"
+                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${simulationMode ? 'bg-stale' : 'bg-border-strong'}`}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${simulationMode ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Conductor's own live map */}
         {gpsFix && (
-          <div className="h-56 w-full rounded-2xl overflow-hidden border border-border-subtle">
+          <div className="h-56 sm:h-64 w-full rounded-2xl overflow-hidden border border-border-subtle">
             <MapContainer
               center={[gpsFix.lat, gpsFix.lon]}
               zoom={16}
@@ -551,14 +589,14 @@ export default function Dashboard() {
             >
               <FollowBus lat={gpsFix.lat} lon={gpsFix.lon} />
               <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               />
               {gpsFix.accuracy != null && (
                 <Circle
                   center={[gpsFix.lat, gpsFix.lon]}
                   radius={gpsFix.accuracy}
-                  pathOptions={{ color: '#3b82f6', fillOpacity: 0.08, weight: 1 }}
+                  pathOptions={{ color: '#1a73e8', fillColor: '#1a73e8', fillOpacity: 0.12, weight: 1 }}
                 />
               )}
               <Marker position={[gpsFix.lat, gpsFix.lon]} icon={conductorBusIcon} />
@@ -566,91 +604,82 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="flex items-center justify-between bg-dark border border-border-subtle p-3 rounded-2xl shadow-soft">
-          <div className="flex items-center gap-2 text-sm text-text-secondary">
-            <Activity size={16} className={simulationMode ? 'text-green-400' : ''}/> 
-            Simulation Mode
+      {/* Trip header */}
+      <div className="card-pad">
+        <div className="flex justify-between items-start gap-4 mb-5">
+          <div className="min-w-0">
+            <span className="badge-accent mb-2">{activeBus?.busNumber}</span>
+            <h2 className="section-title truncate">{activeTrip.route?.name}</h2>
           </div>
-          <button 
-            onClick={() => setSimulationMode(!simulationMode)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${simulationMode ? 'bg-green-500' : 'bg-border-subtle'}`}
-          >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${simulationMode ? 'translate-x-6' : 'translate-x-1'}`} />
-          </button>
-        </div>
-      </div>
-
-      {/* Header Info */}
-      <div className="bg-card border border-border-subtle rounded-3xl p-5 shadow-soft flex flex-col">
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <span className="inline-block px-3 py-1 bg-hover rounded-lg text-sm font-bold tracking-wider mb-2">
-              {activeBus?.busNumber}
-            </span>
-            <h2 className="font-semibold text-lg">{activeTrip.route?.name}</h2>
-          </div>
-          <button onClick={handleEndTrip} className="flex items-center gap-2 text-xs font-semibold text-red-400 bg-red-400/10 px-3 py-2 rounded-lg hover:bg-red-400/20 transition-colors">
-            <Square size={14} /> END
+          <button onClick={handleEndTrip} className="btn-danger btn-sm shrink-0">
+            <Square size={14} /> End trip
           </button>
         </div>
 
         {/* Live GPS Stops Info */}
-        <div className="bg-dark rounded-2xl p-4 border border-border-subtle mb-4">
-            <div className="flex items-start gap-3">
-              <div className="flex flex-col items-center mt-1">
-                <div className="w-3 h-3 rounded-full bg-accent"></div>
-                <div className="w-0.5 h-8 bg-border-subtle my-1"></div>
-                <div className="w-3 h-3 rounded-full border-2 border-accent bg-dark"></div>
+        <div className="bg-dark rounded-xl p-4 border border-border-subtle mb-4">
+          <div className="flex items-start gap-3">
+            <div className="flex flex-col items-center mt-1.5 shrink-0">
+              <div className="w-2.5 h-2.5 rounded-full bg-accent"></div>
+              <div className="w-0.5 h-9 bg-border-strong my-1"></div>
+              <div className="w-2.5 h-2.5 rounded-full border-2 border-accent bg-dark"></div>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="mb-4">
+                <p className="eyebrow">Current stop</p>
+                <p className="font-semibold truncate">{currentStopName}</p>
               </div>
-              <div className="flex-1">
-                <div className="mb-4">
-                  <p className="text-xs text-text-secondary uppercase tracking-wider font-semibold">Current Stop</p>
-                  <p className="font-medium">{currentStopName}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-text-secondary uppercase tracking-wider font-semibold">Next Stop (Auto-detecting via GPS)</p>
-                  <p className="font-medium text-accent">{nextStopName}</p>
-                </div>
+              <div>
+                <p className="eyebrow">Next stop · auto-detected by GPS</p>
+                <p className="font-semibold text-accent truncate">{nextStopName}</p>
               </div>
             </div>
+          </div>
         </div>
 
-        {/* Occupancy Progress */}
-        <div className="mt-2 bg-dark p-4 rounded-2xl border border-border-subtle">
-          <div className="flex justify-between text-sm mb-3">
-            <span className="text-text-secondary flex items-center gap-2"><Users size={16}/> Live Occupancy</span>
-            <span className={`font-bold ${crowdColor} text-xl`}>{currentOcc} <span className="text-text-secondary text-sm font-normal">/ {busCapacity}</span></span>
+        {/* Occupancy */}
+        <div className="bg-dark p-4 rounded-xl border border-border-subtle">
+          <div className="flex justify-between items-end mb-3">
+            <span className="text-sm text-text-secondary flex items-center gap-2"><Users size={15}/> Live occupancy</span>
+            <span className={`font-bold text-2xl numeric ${crowdColor}`}>
+              {currentOcc}<span className="text-text-muted text-base font-medium"> / {busCapacity}</span>
+            </span>
           </div>
-          <div className="h-3 w-full bg-card rounded-full overflow-hidden border border-border-subtle">
+          <div className="h-2.5 w-full bg-card rounded-full overflow-hidden border border-border-subtle">
             <div className={`h-full ${crowdBg} transition-all duration-500`} style={{ width: `${percent}%` }} />
+          </div>
+          <div className="flex justify-between mt-2 text-xs">
+            <span className="text-text-secondary numeric">{Math.max(0, busCapacity - currentOcc)} seats available</span>
+            <span className={`font-semibold ${crowdColor}`}>{crowdLevel}</span>
           </div>
         </div>
       </div>
 
       {/* Primary Action: Issue Ticket */}
-      <button 
+      <button
         onClick={() => setShowIssueModal(true)}
-        className="w-full bg-accent hover:bg-accent/90 text-white p-5 rounded-3xl shadow-soft flex items-center justify-between transition-all active:scale-[0.98]"
+        className="w-full bg-accent hover:bg-accent-strong text-white p-4 rounded-2xl flex items-center justify-between gap-3 transition-colors active:scale-[0.99]"
       >
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-            <Ticket size={24} />
-          </div>
-          <div className="text-left">
-            <h3 className="font-bold text-lg">Issue Ticket</h3>
-            <p className="text-white/80 text-sm">Cash payment only</p>
-          </div>
-        </div>
-        <div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center text-xl font-bold">+</div>
+        <span className="flex items-center gap-3 min-w-0">
+          <span className="w-11 h-11 bg-white/15 rounded-xl flex items-center justify-center shrink-0">
+            <Ticket size={21} />
+          </span>
+          <span className="text-left min-w-0">
+            <span className="block font-bold">Issue ticket</span>
+            <span className="block text-white/75 text-xs">Cash payment only</span>
+          </span>
+        </span>
+        <span className="bg-white/15 w-8 h-8 rounded-full flex items-center justify-center text-xl font-semibold shrink-0">+</span>
       </button>
 
       {/* Issue Ticket Modal */}
       <Modal isOpen={showIssueModal} onClose={() => setShowIssueModal(false)} title="Issue Ticket">
         <div className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-2">Destination Stop</label>
+            <label htmlFor="ticket-destination" className="label">Destination stop</label>
             <select
-              className="w-full bg-dark border border-border-subtle rounded-xl py-3 px-4 text-text-primary focus:outline-none focus:border-accent appearance-none"
+              id="ticket-destination"
+              className="select"
               value={ticketToStopId}
               onChange={(e) => setTicketToStopId(e.target.value)}
             >
@@ -659,35 +688,37 @@ export default function Dashboard() {
                 <option key={rs.stop.id} value={rs.stop.id}>{rs.stop.name}</option>
               ))}
             </select>
+            <p className="field-hint">Passengers leave the bus when it reaches this stop.</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-2">Number of Passengers</label>
-            <div className="flex items-center gap-4 bg-dark rounded-xl border border-border-subtle p-2">
-              <button 
+            <span className="label">Number of passengers</span>
+            <div className="flex items-center gap-3 bg-dark rounded-xl border border-border-subtle p-2">
+              <button
                 type="button"
+                aria-label="One fewer passenger"
                 onClick={() => setPassengerCount(Math.max(1, passengerCount - 1))}
-                className="w-12 h-12 rounded-lg bg-hover flex items-center justify-center text-xl font-bold hover:bg-white/10"
-              >-</button>
-              <div className="flex-1 text-center text-2xl font-bold">{passengerCount}</div>
-              <button 
+                className="w-12 h-12 rounded-lg bg-hover flex items-center justify-center text-2xl font-semibold hover:bg-border-strong transition-colors"
+              >&minus;</button>
+              <div className="flex-1 text-center text-3xl font-bold numeric" aria-live="polite">{passengerCount}</div>
+              <button
                 type="button"
+                aria-label="One more passenger"
                 onClick={() => setPassengerCount(passengerCount + 1)}
-                className="w-12 h-12 rounded-lg bg-hover flex items-center justify-center text-xl font-bold hover:bg-white/10"
+                className="w-12 h-12 rounded-lg bg-hover flex items-center justify-center text-2xl font-semibold hover:bg-border-strong transition-colors"
               >+</button>
             </div>
           </div>
-          <div className="pt-2">
-            <button 
-              disabled={!ticketToStopId || issuing}
-              onClick={handleIssueTicket}
-              className="w-full bg-accent text-white py-4 rounded-xl font-bold text-lg disabled:opacity-50 hover:bg-accent/90 transition-colors"
-            >
-              {issuing ? 'ISSUING...' : 'PRINT TICKET'}
-            </button>
-          </div>
+          <button
+            disabled={!ticketToStopId || issuing}
+            onClick={handleIssueTicket}
+            className="btn-primary btn-block min-h-[52px] text-base"
+          >
+            {issuing ? 'Issuing…' : 'Print ticket'}
+          </button>
         </div>
       </Modal>
 
+      </div>
     </div>
   )
 }

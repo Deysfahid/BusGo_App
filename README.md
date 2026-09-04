@@ -173,7 +173,7 @@ The application includes a seeded route and stops for demonstration:
 
 ## Notes
 
-- Geofencing is configured at a radius of 100 meters with a dwell time of 3 seconds.
+- Geofencing is configured at a radius of 175 meters with a dwell time of 3 seconds (`busgo.geofence.radius` and `busgo.geofence.dwell-seconds` in `application.properties`).
 - Automatic bus stop progression is the core behavior of the system.
 - Real-time trip updates are broadcast over WebSocket topics for connected clients.
 

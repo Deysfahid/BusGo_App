@@ -35,7 +35,7 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="animate-in fade-in duration-500">
+    <div className="p-5 sm:p-7 max-w-[1400px] mx-auto">
       {renderTabContent()}
     </div>
   )
@@ -70,12 +70,12 @@ function OverviewTab() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">Dashboard Overview</h2>
+      <h2 className="page-title mb-6">Dashboard Overview</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {cards.map((card) => {
           const Icon = card.icon
           return (
-            <div key={card.title} className="bg-card border border-border-subtle rounded-2xl p-6 shadow-sm hover:border-text-secondary transition-colors">
+            <div key={card.title} className="card p-5 hover:border-border-strong transition-colors">
               <div className="flex items-start justify-between mb-4">
                 <div className={`p-3 rounded-xl ${card.bg}`}>
                   <Icon size={24} className={card.color} />
@@ -230,7 +230,7 @@ function LiveFleetPanel({ onCountChange }) {
             const stale = ageSec != null && ageSec > 15
 
             return (
-              <div key={tripId} className="bg-card border border-border-subtle rounded-2xl p-5">
+              <div key={tripId} className="card-pad">
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <span className="inline-block px-2 py-1 bg-accent/20 text-accent text-xs font-bold rounded mb-1">
@@ -328,13 +328,13 @@ function BusesTab() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <h2 className="text-2xl font-bold">Bus Fleet</h2>
-        <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+        <h2 className="page-title">Bus Fleet</h2>
+        <button onClick={() => setIsModalOpen(true)} className="btn-primary btn-sm">
           <Plus size={18} /> Add Bus
         </button>
       </div>
 
-      <div className="bg-card border border-border-subtle rounded-2xl overflow-hidden">
+      <div className="card overflow-hidden">
         <div className="p-4 border-b border-border-subtle flex items-center gap-4">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" size={18} />
@@ -343,7 +343,7 @@ function BusesTab() {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="bg-hover/50 text-text-secondary border-b border-border-subtle">
+            <thead className="bg-hover/40 text-text-secondary border-b border-border-subtle">
               <tr>
                 <th className="px-6 py-4 font-medium">Bus Number</th>
                 <th className="px-6 py-4 font-medium">Route</th>
@@ -373,22 +373,22 @@ function BusesTab() {
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Create New Bus">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Bus Number</label>
-            <input type="text" required value={formData.busNumber} onChange={e => setFormData({...formData, busNumber: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="KA-01-F-1234" />
+            <label className="label">Bus Number</label>
+            <input type="text" required value={formData.busNumber} onChange={e => setFormData({...formData, busNumber: e.target.value})} className="input" placeholder="KA-01-F-1234" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Route Name</label>
-            <input type="text" required value={formData.routeName} onChange={e => setFormData({...formData, routeName: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="Majestic -> ITPL" />
+            <label className="label">Route Name</label>
+            <input type="text" required value={formData.routeName} onChange={e => setFormData({...formData, routeName: e.target.value})} className="input" placeholder="Majestic -> ITPL" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Capacity</label>
-            <input type="number" required value={formData.capacity} onChange={e => setFormData({...formData, capacity: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" />
+            <label className="label">Capacity</label>
+            <input type="number" required value={formData.capacity} onChange={e => setFormData({...formData, capacity: e.target.value})} className="input" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Stops (Comma separated)</label>
-            <input type="text" value={formData.stops} onChange={e => setFormData({...formData, stops: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="Stop1, Stop2, Stop3" />
+            <label className="label">Stops (Comma separated)</label>
+            <input type="text" value={formData.stops} onChange={e => setFormData({...formData, stops: e.target.value})} className="input" placeholder="Stop1, Stop2, Stop3" />
           </div>
-          <button type="submit" className="w-full bg-accent hover:bg-accent/90 text-white font-medium py-2.5 rounded-lg mt-6 transition-colors">
+          <button type="submit" className="btn-primary btn-block mt-6">
             Save Bus
           </button>
         </form>
@@ -470,10 +470,10 @@ function RoutesTab() {
           <button onClick={() => { setExpandedRoute(null); setAddStopId(''); setDeleteConfirm(null) }} className="flex items-center gap-2 text-text-secondary hover:text-text-primary bg-hover px-3 py-2 rounded-lg text-sm font-medium transition-colors">
             &larr; Back to Routes
           </button>
-          <h2 className="text-2xl font-bold">Route {route?.name} &mdash; Stop Order</h2>
+          <h2 className="page-title">Route {route?.name} &mdash; Stop Order</h2>
         </div>
         <p className="text-text-secondary text-sm mb-3">Drag rows to reorder &bull; Click trash to delete</p>
-        <div className="bg-card border border-border-subtle rounded-2xl overflow-hidden mb-4">
+        <div className="card overflow-hidden mb-4">
           {sortedStops.length === 0 ? (
             <div className="p-8 text-center text-text-secondary">No stops yet. Add one below.</div>
           ) : (
@@ -504,7 +504,7 @@ function RoutesTab() {
             </div>
           )}
         </div>
-        <div className="bg-card border border-border-subtle rounded-2xl p-5">
+        <div className="card-pad">
           <h3 className="font-semibold mb-3 text-text-secondary text-sm uppercase tracking-wider">Add Stop to Route</h3>
           <div className="flex gap-2">
             <select className="flex-1 bg-dark border border-border-subtle rounded-lg py-2.5 px-3 text-text-primary focus:border-accent outline-none" value={addStopId} onChange={e => setAddStopId(e.target.value)}>
@@ -522,12 +522,12 @@ function RoutesTab() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <h2 className="text-2xl font-bold">Routes</h2>
-        <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+        <h2 className="page-title">Routes</h2>
+        <button onClick={() => setIsModalOpen(true)} className="btn-primary btn-sm">
           <Plus size={18} /> Add Route
         </button>
       </div>
-      <div className="bg-card border border-border-subtle rounded-2xl overflow-hidden">
+      <div className="card overflow-hidden">
         {routes.length === 0 ? (
           <div className="p-8 text-center text-text-secondary">No routes found. Create your first route.</div>
         ) : (
@@ -553,10 +553,10 @@ function RoutesTab() {
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Create New Route">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Route Name / Number</label>
-            <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="e.g. 285 or Silk Board - Indiranagar" />
+            <label className="label">Route Name / Number</label>
+            <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="input" placeholder="e.g. 285 or Silk Board - Indiranagar" />
           </div>
-          <button type="submit" className="w-full bg-accent hover:bg-accent/90 text-white font-medium py-2.5 rounded-lg mt-6 transition-colors">Save Route</button>
+          <button type="submit" className="btn-primary btn-block mt-6">Save Route</button>
         </form>
       </Modal>
     </div>
@@ -704,21 +704,21 @@ function StopsTab() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <h2 className="text-2xl font-bold">Stops</h2>
+        <h2 className="page-title">Stops</h2>
         <div className="flex items-center gap-2">
-          <button onClick={() => setOsmOpen(true)} className="flex items-center gap-2 bg-hover hover:bg-white/10 text-text-primary px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+          <button onClick={() => setOsmOpen(true)} className="btn-secondary btn-sm">
             <MapPin size={18} /> Import from OpenStreetMap
           </button>
-          <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+          <button onClick={() => setIsModalOpen(true)} className="btn-primary btn-sm">
             <Plus size={18} /> Add Stop
           </button>
         </div>
       </div>
 
-      <div className="bg-card border border-border-subtle rounded-2xl overflow-hidden">
+      <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="bg-hover/50 text-text-secondary border-b border-border-subtle">
+            <thead className="bg-hover/40 text-text-secondary border-b border-border-subtle">
               <tr>
                 <th className="px-6 py-4 font-medium">Stop Name</th>
                 <th className="px-6 py-4 font-medium">Coordinates</th>
@@ -760,23 +760,23 @@ function StopsTab() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">Centre latitude</label>
-              <input type="number" step="any" value={osmCentre.lat} onChange={e => setOsmCentre({ ...osmCentre, lat: e.target.value })} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="12.9778" />
+              <label className="label">Centre latitude</label>
+              <input type="number" step="any" value={osmCentre.lat} onChange={e => setOsmCentre({ ...osmCentre, lat: e.target.value })} className="input" placeholder="12.9778" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">Centre longitude</label>
-              <input type="number" step="any" value={osmCentre.lon} onChange={e => setOsmCentre({ ...osmCentre, lon: e.target.value })} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="77.5714" />
+              <label className="label">Centre longitude</label>
+              <input type="number" step="any" value={osmCentre.lon} onChange={e => setOsmCentre({ ...osmCentre, lon: e.target.value })} className="input" placeholder="77.5714" />
             </div>
           </div>
 
-          <button type="button" onClick={osmUseMyLocation} disabled={osmBusy} className="w-full flex items-center justify-center gap-2 bg-hover hover:bg-white/10 text-text-primary py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+          <button type="button" onClick={osmUseMyLocation} disabled={osmBusy} className="btn-secondary btn-block btn-sm">
             <MapPin size={16} /> Use my current location
           </button>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">Radius</label>
-              <select value={osmRadius} onChange={e => setOsmRadius(Number(e.target.value))} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none">
+              <label className="label">Radius</label>
+              <select value={osmRadius} onChange={e => setOsmRadius(Number(e.target.value))} className="input">
                 <option value={500}>500 m</option>
                 <option value={1000}>1 km</option>
                 <option value={2000}>2 km</option>
@@ -785,12 +785,12 @@ function StopsTab() {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">Name contains (optional)</label>
-              <input type="text" value={osmFilter} onChange={e => setOsmFilter(e.target.value)} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="e.g. TTMC" />
+              <label className="label">Name contains (optional)</label>
+              <input type="text" value={osmFilter} onChange={e => setOsmFilter(e.target.value)} className="input" placeholder="e.g. TTMC" />
             </div>
           </div>
 
-          <button type="button" onClick={osmSearch} disabled={osmBusy} className="w-full bg-accent hover:bg-accent/90 text-white py-2.5 rounded-lg font-medium disabled:opacity-50">
+          <button type="button" onClick={osmSearch} disabled={osmBusy} className="btn-primary btn-block">
             {osmBusy ? 'Searching OpenStreetMap...' : 'Search'}
           </button>
 
@@ -835,24 +835,24 @@ function StopsTab() {
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Create New Stop">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Stop Name</label>
-            <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="e.g. Majestic Bus Stand" />
+            <label className="label">Stop Name</label>
+            <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="input" placeholder="e.g. Majestic Bus Stand" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Latitude</label>
-              <input type="number" step="any" value={formData.latitude} onChange={e => setFormData({...formData, latitude: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="12.9778" />
+              <label className="label">Latitude</label>
+              <input type="number" step="any" value={formData.latitude} onChange={e => setFormData({...formData, latitude: e.target.value})} className="input" placeholder="12.9778" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Longitude</label>
-              <input type="number" step="any" value={formData.longitude} onChange={e => setFormData({...formData, longitude: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="77.5714" />
+              <label className="label">Longitude</label>
+              <input type="number" step="any" value={formData.longitude} onChange={e => setFormData({...formData, longitude: e.target.value})} className="input" placeholder="77.5714" />
             </div>
           </div>
           <button
             type="button"
             onClick={handleUseMyLocation}
             disabled={locating}
-            className="w-full flex items-center justify-center gap-2 bg-hover hover:bg-white/10 text-text-primary py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            className="btn-secondary btn-block btn-sm"
           >
             <MapPin size={16} /> {locating ? 'Getting location...' : 'Use my current location'}
           </button>
@@ -861,7 +861,7 @@ function StopsTab() {
             A stop without coordinates still appears on routes, but it cannot trigger the
             GPS geofence, so buses will not auto-advance past it.
           </p>
-          <button type="submit" className="w-full bg-accent hover:bg-accent/90 text-white font-medium py-2.5 rounded-lg mt-6 transition-colors">
+          <button type="submit" className="btn-primary btn-block mt-6">
             Save Stop
           </button>
         </form>
@@ -949,16 +949,16 @@ function ConductorsTab() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <h2 className="text-2xl font-bold">Assign Conductors</h2>
-        <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+        <h2 className="page-title">Assign Conductors</h2>
+        <button onClick={() => setIsAddModalOpen(true)} className="btn-primary btn-sm">
           <Plus size={18} /> Add Conductor
         </button>
       </div>
 
-      <div className="bg-card border border-border-subtle rounded-2xl overflow-hidden">
+      <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="bg-hover/50 text-text-secondary border-b border-border-subtle">
+            <thead className="bg-hover/40 text-text-secondary border-b border-border-subtle">
               <tr>
                 <th className="px-6 py-4 font-medium">Name</th>
                 <th className="px-6 py-4 font-medium">Email</th>
@@ -1006,18 +1006,18 @@ function ConductorsTab() {
       <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Create New Conductor">
         <form onSubmit={handleAddSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Full Name</label>
-            <input type="text" required value={addFormData.name} onChange={e => setAddFormData({...addFormData, name: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="e.g. John Doe" />
+            <label className="label">Full Name</label>
+            <input type="text" required value={addFormData.name} onChange={e => setAddFormData({...addFormData, name: e.target.value})} className="input" placeholder="e.g. John Doe" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Email</label>
-            <input type="email" required value={addFormData.email} onChange={e => setAddFormData({...addFormData, email: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="conductor@busgo.ai" />
+            <label className="label">Email</label>
+            <input type="email" required value={addFormData.email} onChange={e => setAddFormData({...addFormData, email: e.target.value})} className="input" placeholder="conductor@busgo.ai" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Password</label>
-            <input type="password" required value={addFormData.password} onChange={e => setAddFormData({...addFormData, password: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none" placeholder="••••••••" />
+            <label className="label">Password</label>
+            <input type="password" required value={addFormData.password} onChange={e => setAddFormData({...addFormData, password: e.target.value})} className="input" placeholder="••••••••" />
           </div>
-          <button type="submit" className="w-full bg-accent hover:bg-accent/90 text-white font-medium py-2.5 rounded-lg mt-6 transition-colors">
+          <button type="submit" className="btn-primary btn-block mt-6">
             Create Conductor
           </button>
         </form>
@@ -1027,15 +1027,15 @@ function ConductorsTab() {
       <Modal isOpen={isAssignModalOpen} onClose={() => setIsAssignModalOpen(false)} title="Assign to Bus">
         <form onSubmit={handleAssignSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Select Bus</label>
-            <select required value={assignData.busId} onChange={e => setAssignData({...assignData, busId: e.target.value})} className="w-full bg-dark border border-border-subtle rounded-lg py-2 px-3 text-text-primary focus:border-accent outline-none">
+            <label className="label">Select Bus</label>
+            <select required value={assignData.busId} onChange={e => setAssignData({...assignData, busId: e.target.value})} className="input">
               <option value="" disabled>Select a bus...</option>
               {buses.map(b => (
                 <option key={b.id} value={b.id}>{b.busNumber} (Capacity: {b.capacity})</option>
               ))}
             </select>
           </div>
-          <button type="submit" className="w-full bg-accent hover:bg-accent/90 text-white font-medium py-2.5 rounded-lg mt-6 transition-colors">
+          <button type="submit" className="btn-primary btn-block mt-6">
             Confirm Assignment
           </button>
         </form>
@@ -1055,7 +1055,7 @@ function AnalyticsTab() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">Reports & Analytics</h2>
+      <h2 className="page-title mb-6">Reports & Analytics</h2>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-card border border-border-subtle rounded-2xl p-6 shadow-sm">
           <div className="flex items-center gap-2 mb-6 text-text-primary font-medium">
@@ -1148,7 +1148,7 @@ function PredictionsTab() {
     <div>
       <div className="flex items-center gap-3 mb-2">
         <Brain size={26} className="text-accent" />
-        <h2 className="text-2xl font-bold">AI Predictions</h2>
+        <h2 className="page-title">AI Predictions</h2>
       </div>
       <p className="text-text-secondary text-sm mb-6">
         RandomForest models trained inside the backend on {summary.occupancySampleCount} occupancy &amp; {summary.travelSampleCount} travel-time samples.
@@ -1159,7 +1159,7 @@ function PredictionsTab() {
         {statCards.map(c => {
           const Icon = c.icon
           return (
-            <div key={c.title} className="bg-card border border-border-subtle rounded-2xl p-5">
+            <div key={c.title} className="card-pad">
               <div className="flex items-center gap-2 text-text-secondary text-xs font-medium mb-2">
                 <Icon size={16} className={c.color} /> {c.title}
               </div>

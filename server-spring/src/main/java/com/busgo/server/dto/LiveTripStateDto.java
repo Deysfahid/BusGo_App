@@ -15,6 +15,7 @@ public class LiveTripStateDto {
     private Long tripId;
     private Long busId;
     private String busNumber;
+    private Long routeId;
     private String routeName;
     private String status; // active, completed
     

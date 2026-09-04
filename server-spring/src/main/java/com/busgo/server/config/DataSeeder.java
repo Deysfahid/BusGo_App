@@ -34,7 +34,7 @@ public class DataSeeder implements CommandLineRunner {
      * Seeded so routes can be built by picking stops instead of typing
      * coordinates by hand. Coordinates are approximate area centres - accurate
      * enough for the map and for simulation, but check any stop you intend to
-     * use for real-GPS geofencing (the radius is only 100 m). The Stops tab
+     * use for real-GPS geofencing (see busgo.geofence.radius). The Stops tab
      * has a "Use my current location" button for correcting them on site.
      */
     private static final String[][] STOP_CATALOG = {

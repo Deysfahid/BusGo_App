@@ -1,36 +1,59 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 /*
- * Tailwind CSS v4 theme.
+ * Tailwind CSS v4 theme — light, map-application visual language.
+ *
  * Tokens are declared here (not tailwind.config.js) because the v4 PostCSS
  * plugin does not auto-load the legacy JS config. Declaring them in @theme
  * both emits the utility classes (bg-card, text-text-secondary, crowd-*, ...)
  * and exposes them as CSS variables (var(--color-accent), ...).
+ *
+ * Every token NAME is unchanged from the previous theme, so no page needs
+ * editing to follow the palette — `bg-dark` is now the light page ground,
+ * `bg-card` is white, and so on.
  */
 @theme {
-  --font-sans: 'Inter', sans-serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  --color-dark: #0B1120;
-  --color-card: #111827;
-  --color-hover: #1F2937;
-  --color-accent: #3B82F6;
+  /* --- Surfaces --- */
+  --color-dark: #f8f9fa;          /* page ground */
+  --color-card: #ffffff;          /* raised surface */
+  --color-hover: #f1f3f4;         /* hover / inset fill */
+  --color-elevated: #ffffff;
+  --color-surface-2: #f8f9fa;
 
-  --color-text-primary: #F8FAFC;
-  --color-text-secondary: #94A3B8;
+  --color-accent: #1a73e8;
+  --color-accent-strong: #174ea6;
+  --color-accent-soft: #e8f0fe;
 
-  --color-border-subtle: #1E293B;
+  --color-text-primary: #202124;
+  --color-text-secondary: #5f6368;
+  --color-text-muted: #80868b;
 
-  --color-crowd-low: #22C55E;
-  --color-crowd-mod: #F59E0B;
-  --color-crowd-high: #F97316;
-  --color-crowd-full: #EF4444;
+  --color-border-subtle: #dadce0;
+  --color-border-strong: #bdc1c6;
 
-  --shadow-soft: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+  /* --- Status: separate from the accent, so state never reads as branding --- */
+  --color-live: #1e8e3e;
+  --color-stale: #f9ab00;
+  --color-offline: #9aa0a6;
+  --color-danger: #d93025;
+
+  --color-crowd-low: #1e8e3e;
+  --color-crowd-mod: #f9ab00;
+  --color-crowd-high: #e8710a;
+  --color-crowd-full: #d93025;
+
+  /* Shadows carry elevation instead of borders — small, neutral, never coloured. */
+  --shadow-soft: 0 1px 2px rgba(60, 64, 67, .3), 0 1px 3px 1px rgba(60, 64, 67, .15);
+  --shadow-card: 0 1px 2px rgba(60, 64, 67, .3), 0 1px 3px 1px rgba(60, 64, 67, .15);
+  --shadow-lift: 0 1px 3px rgba(60, 64, 67, .3), 0 4px 8px 3px rgba(60, 64, 67, .15);
 }
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -40,11 +63,149 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: 'Inter', sans-serif;
-  color: #F8FAFC;
-  background-color: #0B1120;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  color: #202124;
+  background-color: #f8f9fa;
 }
 
 #root {
   min-height: 100vh;
 }
+
+/* Keyboard focus is always visible, and never on mouse clicks. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* Scrollbars that match the surfaces instead of the OS default. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #bdc1c6 transparent;
+}
+*::-webkit-scrollbar { width: 12px; height: 12px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover { background: #bdc1c6; background-clip: content-box; }
+
+/*
+ * Component primitives. Pages compose these instead of repeating long utility
+ * strings, which is what keeps buttons, inputs, cards and badges consistent.
+ */
+@layer components {
+  /* --- Buttons: 44px min height, touch-friendly on phones --- */
+  .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-5 min-h-[44px]
+           text-sm font-medium transition-colors select-none
+           disabled:opacity-45 disabled:cursor-not-allowed;
+  }
+  .btn-primary { @apply bg-accent text-white hover:bg-accent-strong active:bg-accent-strong; }
+  .btn-secondary { @apply bg-card text-accent border border-border-subtle hover:bg-accent-soft; }
+  .btn-ghost { @apply text-text-secondary hover:bg-hover hover:text-text-primary; }
+  .btn-danger { @apply bg-card text-danger border border-border-subtle hover:bg-danger/8; }
+  .btn-sm { @apply min-h-[36px] px-4 text-[13px]; }
+  .btn-block { @apply w-full; }
+
+  /* --- Surfaces --- */
+  .card, .card-pad, .card-interactive {
+    @apply bg-card border border-border-subtle rounded-xl;
+  }
+  .card-pad { @apply p-5; }
+  .card-interactive {
+    @apply transition-all hover:border-border-strong hover:shadow-soft
+           cursor-pointer text-left w-full;
+  }
+
+  /* --- Forms --- */
+  .label {
+    @apply block text-xs font-medium uppercase tracking-wider text-text-secondary mb-2;
+  }
+  .input, .select {
+    @apply w-full bg-card border border-border-subtle rounded-lg px-4 min-h-[46px] py-2.5
+           text-text-primary placeholder:text-text-muted
+           focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent
+           transition-colors;
+  }
+  .select { @apply appearance-none pr-10 cursor-pointer; }
+  .field-hint { @apply mt-1.5 text-xs text-text-muted; }
+
+  /* --- Badges & status --- */
+  .badge, .badge-accent, .badge-live, .badge-stale, .badge-offline, .badge-danger, .badge-neutral {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1
+           text-[11px] font-semibold uppercase tracking-wide;
+  }
+  .badge-accent { @apply bg-accent-soft text-accent-strong; }
+  .badge-live { @apply bg-live/12 text-live; }
+  .badge-stale { @apply bg-stale/15 text-[#a86800]; }
+  .badge-offline { @apply bg-hover text-text-secondary; }
+  .badge-danger { @apply bg-danger/10 text-danger; }
+  .badge-neutral { @apply bg-hover text-text-secondary; }
+
+  .status-dot { @apply inline-block w-2 h-2 rounded-full shrink-0; }
+
+  /* --- Typography helpers --- */
+  .page-title { @apply text-[22px] sm:text-2xl font-medium tracking-tight; }
+  .section-title { @apply text-base font-medium tracking-tight; }
+  .eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-[0.08em] text-text-secondary;
+  }
+  .numeric { font-variant-numeric: tabular-nums; }
+
+  /* --- States --- */
+  .empty-state {
+    @apply flex flex-col items-center justify-center text-center text-text-secondary py-12 px-6;
+  }
+  .skeleton { @apply bg-hover rounded-lg animate-pulse; }
+}
+
+/* A pulsing ring for the live indicator - one small motion, used once. */
+@keyframes livePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(30, 142, 62, .5); }
+  70%  { box-shadow: 0 0 0 6px rgba(30, 142, 62, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(30, 142, 62, 0); }
+}
+.pulse-live { animation: livePulse 2s ease-out infinite; }
+
+/* Leaflet chrome, restyled to match the app's light surfaces. */
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #ffffff !important;
+  color: #202124 !important;
+  box-shadow: 0 2px 6px rgba(60, 64, 67, .3), 0 8px 24px 4px rgba(60, 64, 67, .15) !important;
+}
+.leaflet-popup-content-wrapper { border-radius: 10px !important; }
+.leaflet-popup-content { margin: 12px 14px !important; font-family: 'Inter', sans-serif !important; }
+.leaflet-popup-close-button { color: #5f6368 !important; }
+.leaflet-container { background: #e5e3df !important; font-family: 'Inter', sans-serif !important; }
+.leaflet-bar {
+  border: none !important;
+  box-shadow: 0 1px 4px rgba(60, 64, 67, .3) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+.leaflet-bar a {
+  background: #ffffff !important;
+  color: #5f6368 !important;
+  border-bottom: 1px solid #e8eaed !important;
+  font-size: 18px !important;
+}
+.leaflet-bar a:hover { background: #f1f3f4 !important; color: #202124 !important; }
+.leaflet-control-attribution {
+  background: rgba(255, 255, 255, .85) !important;
+  color: #5f6368 !important;
+  font-size: 10px !important;
+}
+.leaflet-control-attribution a { color: #1a73e8 !important; }

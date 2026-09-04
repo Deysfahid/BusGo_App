@@ -56,99 +56,96 @@ const Login = () => {
   const isConductor = selectedRole === 'CONDUCTOR';
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 bg-dark relative overflow-hidden min-h-screen">
-      {/* Decorative background elements */}
-      <div className={`absolute top-1/4 left-1/4 w-96 h-96 ${isConductor ? 'bg-orange-400/20' : 'bg-accent/20'} rounded-full blur-[100px] -z-10 transition-colors duration-500`} />
-      <div className={`absolute bottom-1/4 right-1/4 w-96 h-96 ${isConductor ? 'bg-red-500/10' : 'bg-purple-500/10'} rounded-full blur-[100px] -z-10 transition-colors duration-500`} />
+    <div className="min-h-screen flex flex-col items-center justify-center p-5 bg-dark relative overflow-hidden">
+      {/* One soft wash of colour behind the card, tinted to the selected role. */}
+      <div
+        aria-hidden="true"
+        className={`pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[560px] h-[560px] rounded-full blur-[130px] transition-colors duration-500 ${
+          isConductor ? 'bg-stale/10' : 'bg-accent/10'
+        }`}
+      />
 
-      <div className="w-full max-w-md">
-        <div className="flex justify-center mb-6">
-          <div className="bg-accent text-white p-4 rounded-2xl shadow-lg shadow-accent/20">
-            <Bus size={36} />
+      <div className="w-full max-w-md relative">
+        <div className="flex flex-col items-center mb-7">
+          <div className="bg-accent text-white p-3.5 rounded-2xl mb-4">
+            <Bus size={30} />
           </div>
+          <h1 className="text-2xl font-bold tracking-tight">Welcome to BusGo</h1>
+          <p className="text-sm text-text-secondary mt-1">Smart bus tracking &amp; occupancy prediction</p>
         </div>
 
-        <div className="bg-card/80 backdrop-blur-xl rounded-3xl border border-border-subtle p-8 shadow-soft">
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold text-text-primary mb-2">
-              Welcome to BusGo AI
-            </h2>
-            <p className="text-sm text-text-secondary">
-              Smart Bus Tracking & Occupancy Prediction
-            </p>
-          </div>
+        <div className="card p-6 sm:p-7">
+          <fieldset className="mb-6">
+            <legend className="label text-center w-full mb-3">Choose your role to continue</legend>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedRole('ADMIN')}
+                aria-pressed={selectedRole === 'ADMIN'}
+                className={`flex flex-col items-center justify-center gap-2 py-4 rounded-xl border-2 transition-colors ${
+                  selectedRole === 'ADMIN'
+                    ? 'border-accent bg-accent/10 text-accent'
+                    : 'border-border-subtle bg-dark text-text-secondary hover:border-border-strong hover:text-text-primary'
+                }`}
+              >
+                <ShieldCheck size={22} />
+                <span className="font-semibold text-sm">Admin</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedRole('CONDUCTOR')}
+                aria-pressed={selectedRole === 'CONDUCTOR'}
+                className={`flex flex-col items-center justify-center gap-2 py-4 rounded-xl border-2 transition-colors ${
+                  selectedRole === 'CONDUCTOR'
+                    ? 'border-stale bg-stale/10 text-stale'
+                    : 'border-border-subtle bg-dark text-text-secondary hover:border-border-strong hover:text-text-primary'
+                }`}
+              >
+                <UserCircle size={22} />
+                <span className="font-semibold text-sm">Conductor</span>
+              </button>
+            </div>
+          </fieldset>
 
-          <div className="mb-6">
-             <label className="block text-sm font-medium text-text-secondary mb-3 text-center">
-                Choose your role to continue
-             </label>
-             <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setSelectedRole('ADMIN')}
-                  className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
-                    selectedRole === 'ADMIN'
-                      ? 'border-accent bg-accent/10 text-accent'
-                      : 'border-border-subtle bg-dark text-text-secondary hover:border-text-secondary'
-                  }`}
-                >
-                   <ShieldCheck size={24} className="mb-2" />
-                   <span className="font-semibold text-sm">ADMIN</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedRole('CONDUCTOR')}
-                  className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
-                    selectedRole === 'CONDUCTOR'
-                      ? 'border-orange-400 bg-orange-400/10 text-orange-400'
-                      : 'border-border-subtle bg-dark text-text-secondary hover:border-text-secondary'
-                  }`}
-                >
-                   <UserCircle size={24} className="mb-2" />
-                   <span className="font-semibold text-sm">CONDUCTOR</span>
-                </button>
-             </div>
-          </div>
-
-          <form className="space-y-5" onSubmit={handleSubmit}>
+          <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-2">
-                Email Address
-              </label>
+              <label htmlFor="login-email" className="label">Email address</label>
               <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary" size={20} />
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" size={18} />
                 <input
+                  id="login-email"
                   type="email"
                   name="email"
                   value={form.email}
                   onChange={handleChange}
                   required
-                  className="w-full bg-dark border border-border-subtle rounded-xl py-3 pl-12 pr-4 text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent transition-colors"
+                  autoComplete="email"
+                  className="input pl-12"
                   placeholder={isConductor ? "conductor@busgo.ai" : "admin@busgo.ai"}
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-2">
-                Password
-              </label>
+              <label htmlFor="login-password" className="label">Password</label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary" size={20} />
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" size={18} />
                 <input
+                  id="login-password"
                   type="password"
                   name="password"
                   value={form.password}
                   onChange={handleChange}
                   required
-                  className="w-full bg-dark border border-border-subtle rounded-xl py-3 pl-12 pr-4 text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent transition-colors"
+                  autoComplete="current-password"
+                  className="input pl-12"
                   placeholder="Enter your password"
                 />
               </div>
             </div>
 
             {error && (
-              <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-xl px-4 py-3 text-center">
+              <div role="alert" className="bg-danger/10 border border-danger/25 text-danger text-sm rounded-xl px-4 py-3">
                 {error}
               </div>
             )}
@@ -156,17 +153,17 @@ const Login = () => {
             <button
               type="submit"
               disabled={loading}
-              className={`w-full flex items-center justify-center gap-2 text-white rounded-xl py-3 font-semibold transition-all disabled:opacity-50 ${isConductor ? 'bg-orange-500 hover:bg-orange-600' : 'bg-accent hover:bg-accent/90'}`}
+              className={`btn-block min-h-[50px] text-base ${isConductor ? 'btn-primary bg-stale hover:bg-stale/90 text-dark' : 'btn-primary'}`}
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? 'Signing in…' : 'Sign in'}
               {!loading && <ArrowRight size={18} />}
             </button>
           </form>
-          
-          <div className="mt-6 flex flex-col items-center gap-2">
-             <Link to="/home" className="text-sm font-medium text-text-secondary hover:text-white transition-colors">
-                Continue as Guest Passenger →
-             </Link>
+
+          <div className="mt-6 pt-5 border-t border-border-subtle text-center">
+            <Link to="/home" className="text-sm font-medium text-text-secondary hover:text-text-primary transition-colors inline-flex items-center gap-1.5">
+              Continue as guest passenger <ArrowRight size={15} />
+            </Link>
           </div>
         </div>
       </div>

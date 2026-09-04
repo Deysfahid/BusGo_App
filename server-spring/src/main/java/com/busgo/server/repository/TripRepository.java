@@ -13,6 +13,10 @@ import java.util.Optional;
 public interface TripRepository extends JpaRepository<Trip, Long> {
     List<Trip> findByStatus(String status);
     List<Trip> findByBusIdAndStatus(Long busId, String status);
+
+    /** Active trips on one route - the buses a passenger sees when they search that route. */
+    @Query("select t from Trip t join fetch t.bus join fetch t.route where t.route.id = :routeId and t.status = :status")
+    List<Trip> findByRouteIdAndStatusWithBusAndRoute(@Param("routeId") Long routeId, @Param("status") String status);
     boolean existsByBusId(Long busId);
 
     /**
