@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
@@ -54,8 +55,11 @@ public class LocationService {
 
     private final Map<Long, GeofenceEntry> geofenceEntryMap = new ConcurrentHashMap<>();
 
-    /** Latest known position per trip id: {lat, lon}. */
-    private final Map<Long, double[]> latestLocations = new ConcurrentHashMap<>();
+    /** Latest known position for a trip, with the moment the fix was received. */
+    private record LastFix(double lat, double lon, long atEpochMillis) {}
+
+    /** Latest known position per trip id. */
+    private final Map<Long, LastFix> latestLocations = new ConcurrentHashMap<>();
 
     /**
      * Transactional entry point for a GPS ping arriving on the STOMP endpoint.
@@ -134,7 +138,8 @@ public class LocationService {
     }
 
     public LiveTripStateDto processLocationUpdate(Trip trip, double lat, double lon, Double accuracy) {
-        latestLocations.put(trip.getId(), new double[]{lat, lon});
+        long fixAt = System.currentTimeMillis();
+        latestLocations.put(trip.getId(), new LastFix(lat, lon, fixAt));
 
         List<RouteStop> stops = routeStopRepository.findByRouteIdOrderByStopOrderAsc(trip.getRoute().getId());
         int currentIndex = indexOfCurrentStop(trip, stops);
@@ -150,7 +155,7 @@ public class LocationService {
             currentIndex = indexOfCurrentStop(trip, stops);
         }
 
-        return buildDto(trip, lat, lon, stops, currentIndex, true);
+        return buildDto(trip, lat, lon, stops, currentIndex, true, fixAt);
     }
 
     /**
@@ -251,17 +256,26 @@ public class LocationService {
      * opening the app - or the app restarting - still shows the bus.
      */
     public LiveTripStateDto getCurrentState(Trip trip) {
-        double[] loc = latestLocations.get(trip.getId());
+        LastFix loc = latestLocations.get(trip.getId());
         if (loc == null) {
+            // Nothing cached (a restart, or another instance took the pings):
+            // fall back to the newest stored position AND its real recorded time,
+            // so an abandoned trip reports how old its last fix actually is.
             loc = busLocationRepository.findTopByTripIdOrderByTimestampDesc(trip.getId())
-                    .map(bl -> new double[]{bl.getLatitude(), bl.getLongitude()})
+                    .map(bl -> new LastFix(
+                            bl.getLatitude(),
+                            bl.getLongitude(),
+                            bl.getTimestamp()
+                                    .atZone(ZoneId.systemDefault())
+                                    .toInstant()
+                                    .toEpochMilli()))
                     .orElse(null);
         }
         List<RouteStop> stops = routeStopRepository.findByRouteIdOrderByStopOrderAsc(trip.getRoute().getId());
         int currentIndex = indexOfCurrentStop(trip, stops);
 
         if (loc != null) {
-            return buildDto(trip, loc[0], loc[1], stops, currentIndex, true);
+            return buildDto(trip, loc.lat(), loc.lon(), stops, currentIndex, true, loc.atEpochMillis());
         }
 
         // No GPS has ever arrived for this trip. Report an unknown position rather
@@ -273,7 +287,7 @@ public class LocationService {
                 ? origin.getStop().getLatitude() : 0.0;
         double lon = (origin != null && origin.getStop().getLongitude() != null)
                 ? origin.getStop().getLongitude() : 0.0;
-        return buildDto(trip, lat, lon, stops, currentIndex, false);
+        return buildDto(trip, lat, lon, stops, currentIndex, false, null);
     }
 
     /** Loads a trip and returns its live state; used by the REST live-state endpoint. */
@@ -284,8 +298,15 @@ public class LocationService {
                 .orElse(null);
     }
 
+    /**
+     * @param positionAt when the position being reported was actually received;
+     *                   null when the trip has never reported one. This is the
+     *                   value clients use to decide live / stale / no-GPS, so it
+     *                   must never be "now" unless a fix really just arrived.
+     */
     private LiveTripStateDto buildDto(Trip trip, double lat, double lon,
-                                      List<RouteStop> stops, int currentIndex, boolean hasPosition) {
+                                      List<RouteStop> stops, int currentIndex,
+                                      boolean hasPosition, Long positionAt) {
         RouteStop currentRouteStop = (currentIndex != -1) ? stops.get(currentIndex) : null;
         RouteStop nextRouteStop = null;
         if (currentIndex < stops.size() - 1) {
@@ -344,7 +365,7 @@ public class LocationService {
                 .predictedCrowdLevel(predictedCrowd)
                 .modelActive(modelActive)
                 .remainingStopsEta(etas)
-                .timestamp(System.currentTimeMillis())
+                .timestamp(positionAt)
                 .build();
     }
 }

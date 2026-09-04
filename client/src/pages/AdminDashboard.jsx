@@ -180,10 +180,38 @@ function LiveFleetPanel({ onCountChange }) {
   }, [])
 
   const entries = Object.entries(fleet)
+  const [endingTripId, setEndingTripId] = useState(null)
 
   useEffect(() => {
     onCountChange?.(entries.length)
   }, [entries.length, onCountChange])
+
+  /**
+   * Admin-only recovery for a stranded trip: the conductor closed the app or
+   * lost the phone without pressing END. Uses the same TripService.endTrip the
+   * conductor button uses, so tickets are completed and occupancy reset exactly
+   * as usual, and the broadcast removes the bus from every live view.
+   * This ends a TRIP - it never deletes a bus.
+   */
+  const endTripFromAdmin = async (tripId, busNumber) => {
+    if (!confirm(`End the active trip for ${busNumber || 'this bus'}?\n\nRemaining tickets are completed and the bus stops appearing as live. The bus itself is not deleted.`)) return
+    setEndingTripId(tripId)
+    try {
+      const token = localStorage.getItem('busgo_token')
+      await apiRequest(`/api/admin/trips/${tripId}/end`, { method: 'POST', authToken: token })
+      // The 'completed' broadcast removes it, but drop it locally too in case
+      // this admin is not subscribed at that moment.
+      setFleet(prev => {
+        const next = { ...prev }
+        delete next[tripId]
+        return next
+      })
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setEndingTripId(null)
+    }
+  }
 
   const crowdColor = (level) => {
     switch (level) {
@@ -224,23 +252,40 @@ function LiveFleetPanel({ onCountChange }) {
             const occ = live?.currentOccupancy ?? 0
             const percent = Math.min(100, Math.round((occ / cap) * 100))
             const level = live?.crowdLevel || 'LOW'
-            // Clamped: the server stamps the time, so a small clock skew between
-            // machines can otherwise render a negative age.
+            // The server now reports when the position was actually received, so
+            // this age is real. Clamped because a small clock skew between the
+            // server and this browser can otherwise render a negative number.
             const ageSec = live?.timestamp ? Math.max(0, Math.round((now - live.timestamp) / 1000)) : null
-            const stale = ageSec != null && ageSec > 15
+            const gps = ageSec == null ? 'offline' : ageSec > 20 ? 'stale' : 'live'
+            const ageLabel =
+              ageSec == null ? 'no GPS received'
+              : ageSec < 60 ? `${ageSec}s ago`
+              : ageSec < 3600 ? `${Math.round(ageSec / 60)} min ago`
+              : ageSec < 86400 ? `${Math.round(ageSec / 3600)} hr ago`
+              : `${Math.round(ageSec / 86400)} day(s) ago`
 
             return (
               <div key={tripId} className="card-pad">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <span className="inline-block px-2 py-1 bg-accent/20 text-accent text-xs font-bold rounded mb-1">
-                      {item.busNumber || `Bus #${item.busId}`}
-                    </span>
-                    <h4 className="font-semibold">{item.routeName || 'Unknown route'}</h4>
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="min-w-0">
+                    <span className="badge-accent mb-1.5">{item.busNumber || `Bus #${item.busId}`}</span>
+                    <h4 className="font-semibold truncate">{item.routeName || 'Unknown route'}</h4>
                   </div>
-                  <span className={`text-xs font-medium ${stale ? 'text-amber-400' : 'text-text-secondary'}`}>
-                    {ageSec == null ? 'awaiting GPS' : stale ? `no GPS for ${ageSec}s` : `${ageSec}s ago`}
-                  </span>
+                  <div className="flex flex-col items-end gap-1.5 shrink-0">
+                    <span className={gps === 'live' ? 'badge-live' : gps === 'stale' ? 'badge-stale' : 'badge-offline'}>
+                      <span className={`status-dot ${gps === 'live' ? 'bg-live pulse-live' : gps === 'stale' ? 'bg-stale' : 'bg-offline'}`} />
+                      {gps === 'live' ? 'Live' : gps === 'stale' ? 'Stale' : 'No GPS'}
+                    </span>
+                    <span className="text-[11px] text-text-secondary">{ageLabel}</span>
+                    {/* Ends a stranded trip. This ends a TRIP, never a bus. */}
+                    <button
+                      onClick={() => endTripFromAdmin(tripId, item.busNumber)}
+                      disabled={endingTripId === tripId}
+                      className="btn-danger btn-sm"
+                    >
+                      {endingTripId === tripId ? 'Ending…' : 'End trip'}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2 text-sm mb-4">

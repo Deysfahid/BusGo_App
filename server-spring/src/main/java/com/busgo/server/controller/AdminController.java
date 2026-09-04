@@ -7,6 +7,7 @@ import com.busgo.server.entity.Role;
 import com.busgo.server.entity.Route;
 import com.busgo.server.entity.RouteStop;
 import com.busgo.server.entity.Stop;
+import com.busgo.server.entity.Trip;
 import com.busgo.server.entity.User;
 import com.busgo.server.repository.BusRepository;
 import com.busgo.server.repository.RouteRepository;
@@ -15,6 +16,7 @@ import com.busgo.server.repository.StopRepository;
 import com.busgo.server.repository.UserRepository;
 import com.busgo.server.service.AdminService;
 import com.busgo.server.service.OsmStopImportService;
+import com.busgo.server.service.TripService;
 import com.busgo.server.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -38,6 +40,7 @@ public class AdminController {
     private final StopRepository stopRepository;
     private final UserRepository userRepository;
     private final OsmStopImportService osmStopImportService;
+    private final TripService tripService;
 
     // --- DASHBOARD STATS ---
     @GetMapping("/stats")
@@ -133,6 +136,20 @@ public class AdminController {
         routeStopRepository.save(stops.get(idx));
         routeStopRepository.save(stops.get(swapIdx));
         return ResponseEntity.ok(ApiResponse.success("Reordered"));
+    }
+
+    // --- TRIPS ---
+
+    /**
+     * Ends a stranded active trip from the admin console. Delegates to the same
+     * TripService.endTrip the conductor's END button uses, so ticket completion,
+     * occupancy reset and the WebSocket broadcast all behave identically.
+     *
+     * <p>This ends a TRIP. It never deletes a bus, route, stop or ticket.</p>
+     */
+    @PostMapping("/trips/{tripId}/end")
+    public ResponseEntity<ApiResponse<Trip>> endTrip(@PathVariable Long tripId) {
+        return ResponseEntity.ok(ApiResponse.success("Trip ended", tripService.endTrip(tripId)));
     }
 
     // --- OPENSTREETMAP STOP IMPORT (static reference data only) ---

@@ -138,11 +138,22 @@ const crowdFromOccupancy = (occ, cap) => {
   return 'LOW'
 }
 
-const isStaleAt = (b, now) => b.timestamp != null && now - b.timestamp > STALE_MS
+// LIVE  = a fix arrived within STALE_MS
+// STALE = we have a position, but it is old
+// NO GPS = the bus has never reported one (timestamp is null)
+const gpsStateOf = (b, now) => {
+  if (b.timestamp == null) return 'offline'
+  return now - b.timestamp > STALE_MS ? 'stale' : 'live'
+}
+const isStaleAt = (b, now) => gpsStateOf(b, now) !== 'live'
 const ageTextAt = (b, now) => {
-  if (b.timestamp == null) return 'awaiting GPS'
-  const s = Math.max(0, Math.round((now - b.timestamp) / 1000))
-  return s > STALE_MS / 1000 ? `Last update ${s} sec ago` : `Updated ${s} sec ago`
+  if (b.timestamp == null) return 'No GPS received'
+  const secs = Math.max(0, Math.round((now - b.timestamp) / 1000))
+  if (secs <= STALE_MS / 1000) return `Updated ${secs} sec ago`
+  if (secs < 3600) return `Last update ${secs} sec ago`
+  if (secs < 86400) return `Last update ${Math.round(secs / 3600)} hr ago`
+  const days = Math.round(secs / 86400)
+  return `Last update ${days} day${days === 1 ? '' : 's'} ago`
 }
 
 const OccupancyBar = ({ occupancy, capacity, crowdLevel }) => {
@@ -163,7 +174,7 @@ const OccupancyBar = ({ occupancy, capacity, crowdLevel }) => {
 
 /* --- The bus card used in the route results list --- */
 const BusCard = ({ b, now, focused, onFocus }) => {
-  const stale = isStaleAt(b, now)
+  const gps = gpsStateOf(b, now)
   const cap = b.maxCapacity || 50
   const occ = b.currentOccupancy ?? 0
   const eta = b.remainingStopsEta?.[0]
@@ -175,9 +186,9 @@ const BusCard = ({ b, now, focused, onFocus }) => {
     >
       <div className="flex items-start justify-between gap-3 mb-3">
         <span className="font-bold tracking-tight truncate">{b.busNumber || `Bus #${b.busId}`}</span>
-        <span className={stale ? 'badge-stale' : 'badge-live'}>
-          <span className={`status-dot ${stale ? 'bg-stale' : 'bg-live pulse-live'}`} />
-          {stale ? 'Stale' : 'Live'}
+        <span className={gps === 'live' ? 'badge-live' : gps === 'stale' ? 'badge-stale' : 'badge-offline'}>
+          <span className={`status-dot ${gps === 'live' ? 'bg-live pulse-live' : gps === 'stale' ? 'bg-stale' : 'bg-offline'}`} />
+          {gps === 'live' ? 'Live' : gps === 'stale' ? 'Location stale' : 'No GPS'}
         </span>
       </div>
 
@@ -500,8 +511,12 @@ function Home() {
                             {b.remainingStopsEta[0].stopName} in {b.remainingStopsEta[0].estimatedMinutes} min
                           </div>
                         )}
-                        <div className={`text-xs mt-1.5 ${isStale(b) ? 'text-stale' : 'text-live'}`}>
-                          {isStale(b) ? '○ ' : '● '}{ageText(b)}
+                        <div className={`text-xs mt-1.5 ${
+                          gpsStateOf(b, now) === 'live' ? 'text-live'
+                            : gpsStateOf(b, now) === 'stale' ? 'text-stale' : 'text-text-muted'
+                        }`}>
+                          {gpsStateOf(b, now) === 'live' ? '● LIVE · ' : gpsStateOf(b, now) === 'stale' ? '○ LOCATION STALE · ' : '○ NO GPS · '}
+                          {ageText(b)}
                         </div>
                       </Popup>
                     </Marker>
