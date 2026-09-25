@@ -57,6 +57,30 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-5 bg-dark relative overflow-hidden">
+      {/* Subtle transit-map motif behind everything: soft roads and a route line
+          with stops, echoing the product without competing with the card. */}
+      <svg
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 w-full h-full opacity-[0.5]"
+        preserveAspectRatio="xMidYMid slice"
+        viewBox="0 0 1200 800"
+        fill="none"
+      >
+        <g stroke="#dadce0" strokeWidth="2">
+          <path d="M-50 180 H1250" />
+          <path d="M-50 620 H1250" />
+          <path d="M240 -50 V850" />
+          <path d="M900 -50 V850" />
+          <path d="M-50 400 H1250" opacity="0.6" />
+          <path d="M560 -50 V850" opacity="0.6" />
+        </g>
+        {/* A single highlighted route line with stops, in the brand blue. */}
+        <path d="M120 700 C 380 560, 300 360, 560 300 S 940 220, 1080 120"
+              stroke="#1a73e8" strokeWidth="4" strokeLinecap="round" opacity="0.35" />
+        {[[120,700],[360,470],[560,300],[820,250],[1080,120]].map(([cx, cy], i) => (
+          <circle key={i} cx={cx} cy={cy} r="7" fill="#ffffff" stroke="#1a73e8" strokeWidth="3" opacity="0.5" />
+        ))}
+      </svg>
       {/* One soft wash of colour behind the card, tinted to the selected role. */}
       <div
         aria-hidden="true"

@@ -35,16 +35,17 @@
   --color-border-subtle: #dadce0;
   --color-border-strong: #bdc1c6;
 
-  /* --- Status: separate from the accent, so state never reads as branding --- */
-  --color-live: #1e8e3e;
-  --color-stale: #f9ab00;
+  /* --- Status: separate from the accent, so state never reads as branding.
+     Aligned to the Google transit status palette (LIVE / warning / error). --- */
+  --color-live: #34a853;
+  --color-stale: #fbbc04;
   --color-offline: #9aa0a6;
-  --color-danger: #d93025;
+  --color-danger: #ea4335;
 
-  --color-crowd-low: #1e8e3e;
-  --color-crowd-mod: #f9ab00;
+  --color-crowd-low: #34a853;
+  --color-crowd-mod: #fbbc04;
   --color-crowd-high: #e8710a;
-  --color-crowd-full: #d93025;
+  --color-crowd-full: #ea4335;
 
   /* Shadows carry elevation instead of borders — small, neutral, never coloured. */
   --shadow-soft: 0 1px 2px rgba(60, 64, 67, .3), 0 1px 3px 1px rgba(60, 64, 67, .15);
@@ -169,13 +170,45 @@ body {
     @apply flex flex-col items-center justify-center text-center text-text-secondary py-12 px-6;
   }
   .skeleton { @apply bg-hover rounded-lg animate-pulse; }
+
+  /* --- Transit primitives (Google-transit inspired) --- */
+  /* A route-number "line" badge, like the coloured line chips in a transit app. */
+  .route-pill {
+    @apply inline-flex items-center justify-center rounded-md bg-accent text-white
+           font-bold tracking-tight px-2 py-0.5 text-[13px] leading-none shrink-0;
+  }
+  .route-pill-lg { @apply text-base px-2.5 py-1; }
+
+  /* Vertical stop timeline: dots joined by a line, the way a bus route reads. */
+  .stop-timeline { @apply relative; }
+  .stop-row { @apply relative flex items-center gap-3 pl-1; }
+  .stop-row::before {
+    content: "";
+    position: absolute;
+    left: 9px; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--color-border-subtle);
+  }
+  .stop-row:first-child::before { top: 50%; }
+  .stop-row:last-child::before { bottom: 50%; }
+  .stop-dot {
+    @apply relative z-10 w-[10px] h-[10px] rounded-full bg-white shrink-0;
+    box-shadow: 0 0 0 2px var(--color-accent);
+  }
+  .stop-dot-muted { box-shadow: 0 0 0 2px var(--color-offline); }
+
+  /* A panel that floats above the map (stronger shadow than a flat card). */
+  .floating-panel {
+    @apply bg-card rounded-2xl border border-border-subtle;
+    box-shadow: var(--shadow-lift);
+  }
 }
 
 /* A pulsing ring for the live indicator - one small motion, used once. */
 @keyframes livePulse {
-  0%   { box-shadow: 0 0 0 0 rgba(30, 142, 62, .5); }
-  70%  { box-shadow: 0 0 0 6px rgba(30, 142, 62, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(30, 142, 62, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(52, 168, 83, .5); }
+  70%  { box-shadow: 0 0 0 6px rgba(52, 168, 83, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 168, 83, 0); }
 }
 .pulse-live { animation: livePulse 2s ease-out infinite; }
 

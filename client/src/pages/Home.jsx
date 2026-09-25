@@ -420,8 +420,10 @@ function Home() {
   const endpointsFromName = (name) => {
     if (!name) return null
     const afterDot = name.includes('·') ? name.split('·').slice(1).join('·').trim() : name
-    if (afterDot.includes('→')) {
-      const [from, to] = afterDot.split('→').map(s => s.trim())
+    // Accept "Origin → Destination" (BMTC) or "Origin - Destination" (seeded names).
+    const sep = afterDot.includes('→') ? '→' : (/\s-\s/.test(afterDot) ? ' - ' : null)
+    if (sep) {
+      const [from, to] = afterDot.split(sep).map(s => s.trim())
       if (from && to) return { from, to }
     }
     return null
@@ -583,14 +585,15 @@ function Home() {
           </div>
 
           {selectedRoute && (
-            <div className="mt-4 flex items-center gap-2.5">
-              <span className={liveCount > 0 ? 'badge-live' : 'badge-neutral'}>
-                <span className={`status-dot ${liveCount > 0 ? 'bg-live pulse-live' : 'bg-offline'}`} />
-                {liveCount} active {liveCount === 1 ? 'bus' : 'buses'}
-              </span>
+            <div className="mt-4 flex items-center gap-2.5 min-w-0">
+              <span className="route-pill">{(selectedRoute.name || '').split('·')[0].trim() || 'Route'}</span>
               {routeEnds && (
-                <span className="text-xs text-text-secondary truncate">{routeEnds.from} → {routeEnds.to}</span>
+                <span className="text-sm text-text-secondary truncate min-w-0">{routeEnds.from} → {routeEnds.to}</span>
               )}
+              <span className={`${liveCount > 0 ? 'badge-live' : 'badge-neutral'} ml-auto shrink-0`}>
+                <span className={`status-dot ${liveCount > 0 ? 'bg-live pulse-live' : 'bg-offline'}`} />
+                {liveCount} {liveCount === 1 ? 'bus' : 'buses'}
+              </span>
             </div>
           )}
         </div>
@@ -643,26 +646,35 @@ function Home() {
                       eventHandlers={{ click: () => setFocusedTripId(b.tripId) }}
                     >
                       <Popup>
-                        <div className="font-bold text-sm mb-0.5">{b.busNumber || `Bus #${b.busId}`}</div>
-                        <div className="text-xs text-text-secondary mb-2">Route {b.routeName}</div>
-                        <div className="text-sm mb-1">
-                          {b.currentStopName || 'Not reached yet'} → <span className="text-accent">{b.nextStopName || 'End of route'}</span>
-                        </div>
-                        <div className="text-sm numeric">
-                          {b.availableSeats ?? '—'} of {b.maxCapacity ?? '—'} seats free
-                        </div>
-                        <NextStopAlighting b={b} compact />
-                        {b.remainingStopsEta?.[0] && (
-                          <div className="text-sm numeric">
-                            {b.remainingStopsEta[0].stopName} in {b.remainingStopsEta[0].estimatedMinutes} min
+                        <div className="min-w-[200px]">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className="route-pill">{(b.routeName || '').split('·')[0].trim() || 'Route'}</span>
+                            <span className="font-bold text-sm truncate">{b.busNumber || `Bus #${b.busId}`}</span>
                           </div>
-                        )}
-                        <div className={`text-xs mt-1.5 ${
-                          gpsStateOf(b, now) === 'live' ? 'text-live'
-                            : gpsStateOf(b, now) === 'stale' ? 'text-stale' : 'text-text-muted'
-                        }`}>
-                          {gpsStateOf(b, now) === 'live' ? '● LIVE · ' : gpsStateOf(b, now) === 'stale' ? '○ LOCATION STALE · ' : '○ NO GPS · '}
-                          {ageText(b)}
+                          <div className={`inline-flex items-center gap-1.5 text-xs font-semibold mb-2 ${
+                            gpsStateOf(b, now) === 'live' ? 'text-live'
+                              : gpsStateOf(b, now) === 'stale' ? 'text-stale' : 'text-text-muted'
+                          }`}>
+                            <span className={`status-dot ${gpsStateOf(b, now) === 'live' ? 'bg-live pulse-live' : gpsStateOf(b, now) === 'stale' ? 'bg-stale' : 'bg-offline'}`} />
+                            {gpsStateOf(b, now) === 'live' ? 'LIVE' : gpsStateOf(b, now) === 'stale' ? 'LOCATION STALE' : 'NO GPS'} · {ageText(b)}
+                          </div>
+                          <div className="text-sm mb-1.5">
+                            {b.currentStopName || 'Not reached yet'} <span className="text-text-muted">→</span> <span className="text-accent font-medium">{b.nextStopName || 'End of route'}</span>
+                          </div>
+                          <div className="text-sm numeric mb-1">
+                            <span className="font-semibold">{b.availableSeats ?? '—'}</span> of {b.maxCapacity ?? '—'} seats free
+                          </div>
+                          <NextStopAlighting b={b} compact />
+                          {b.remainingStopsEta?.length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-border-subtle space-y-1">
+                              {b.remainingStopsEta.slice(0, 3).map((eta) => (
+                                <div key={`pop-${b.tripId}-${eta.stopId}`} className="flex items-center justify-between gap-3 text-sm">
+                                  <span className="truncate">{eta.stopName}</span>
+                                  <span className="numeric font-semibold shrink-0">{eta.estimatedMinutes} min</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </Popup>
                     </Marker>
@@ -842,12 +854,12 @@ function Home() {
                 {routeStops.length > 0 && (
                   <div className="card p-4">
                     <p className="eyebrow mb-3">{routeStops.length} stops on this route</p>
-                    <ol className="space-y-2">
+                    <ol className="stop-timeline">
                       {routeStops.map((s) => (
-                        <li key={`rs-${s.id}`} className="flex items-center gap-2.5 text-sm">
-                          <span className="numeric text-xs text-text-muted w-5 shrink-0">{s.stopOrder}</span>
-                          <span className={`status-dot shrink-0 ${s.lat != null ? 'bg-accent' : 'bg-offline'}`} />
+                        <li key={`rs-${s.id}`} className="stop-row py-1.5 text-sm">
+                          <span className={`stop-dot ${s.lat != null ? '' : 'stop-dot-muted'}`} />
                           <span className="truncate">{s.name}</span>
+                          <span className="numeric text-xs text-text-muted ml-auto shrink-0">{s.stopOrder}</span>
                         </li>
                       ))}
                     </ol>
