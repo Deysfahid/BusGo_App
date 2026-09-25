@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { apiRequest } from '../lib/api'
-import { Search, MapPin, Clock, Navigation, Bus, Sparkles, X, Users, ArrowRight } from 'lucide-react'
+import { Search, MapPin, Clock, Navigation, Bus, Sparkles, X, Users, ArrowRight, ArrowDown, Armchair } from 'lucide-react'
 import { connectWebSocket, disconnectWebSocket } from '../lib/websocket'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMap, CircleMarker, Polyline } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -172,6 +172,45 @@ const OccupancyBar = ({ occupancy, capacity, crowdLevel }) => {
   )
 }
 
+/* --- Passengers expected to get down at the bus's next stop ---
+   Read straight from the live state (server counts ACTIVE tickets whose
+   destination is the next stop). Occupancy is NOT adjusted here: the bus is
+   still as full as it says until those passengers actually get off, so the
+   wording is always "getting down" / "expected", never "available". */
+const alightingOf = (b) => {
+  if (!b || b.nextStopId == null || b.expectedPassengersGettingDownAtNextStop == null) return null
+  const down = b.expectedPassengersGettingDownAtNextStop
+  const cap = b.maxCapacity ?? 50
+  const free = b.availableSeats ?? Math.max(0, cap - (b.currentOccupancy ?? 0))
+  const after = b.expectedAvailableSeatsAfterNextStop ?? Math.min(cap, free + down)
+  return { down, after }
+}
+
+const NextStopAlighting = ({ b, compact = false }) => {
+  const a = alightingOf(b)
+  if (!a) return null
+  const noOne = a.down === 0
+  return (
+    <div className={compact ? 'mt-1.5 text-xs' : 'mt-3 rounded-xl border border-border-subtle bg-dark px-3 py-2.5 text-sm'}>
+      {!compact && (
+        <p className="eyebrow mb-1">Next stop · <span className="text-accent normal-case tracking-normal">{b.nextStopName}</span></p>
+      )}
+      <p className={`flex items-center gap-1.5 ${noOne ? 'text-text-muted' : 'text-text-primary'}`}>
+        <ArrowDown size={compact ? 12 : 14} className={noOne ? 'text-text-muted shrink-0' : 'text-accent shrink-0'} />
+        {noOne
+          ? 'No passengers getting down'
+          : <><span className="numeric font-semibold">{a.down}</span>&nbsp;{a.down === 1 ? 'passenger' : 'passengers'} getting down</>}
+      </p>
+      {!noOne && (
+        <p className="flex items-center gap-1.5 text-text-secondary mt-0.5">
+          <Armchair size={compact ? 12 : 14} className="shrink-0" />
+          <span className="numeric font-semibold text-text-primary">{a.after}</span>&nbsp;{a.after === 1 ? 'seat' : 'seats'} expected after {compact ? 'next stop' : b.nextStopName}
+        </p>
+      )}
+    </div>
+  )
+}
+
 /* --- The bus card used in the route results list --- */
 const BusCard = ({ b, now, focused, onFocus }) => {
   const gps = gpsStateOf(b, now)
@@ -201,6 +240,8 @@ const BusCard = ({ b, now, focused, onFocus }) => {
 
       <OccupancyBar occupancy={occ} capacity={cap} crowdLevel={b.crowdLevel} />
 
+      <NextStopAlighting b={b} />
+
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-border-subtle text-sm">
         <span className="flex items-center gap-1.5 text-text-secondary">
           <Users size={14} />
@@ -223,8 +264,9 @@ function Home() {
   const [selectedTripId, setSelectedTripId] = useState(null)
 
   // --- Route tracking: every active bus on one route, keyed by trip id ---
-  const [routes, setRoutes] = useState([])
+  const [routes, setRoutes] = useState([])           // current search results ({id,name}), server-limited
   const [selectedRoute, setSelectedRoute] = useState(null)
+  const [routeStops, setRouteStops] = useState([])   // ordered static stops of the selected route
   const [routeBuses, setRouteBuses] = useState({})   // tripId -> LiveTripStateDto
   const [routeLoading, setRouteLoading] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -237,102 +279,165 @@ function Home() {
   const selectedRouteRef = useRef(null)
   useEffect(() => { selectedRouteRef.current = selectedRoute }, [selectedRoute])
 
+  // STOMP subscription handles, kept so we can switch cleanly between the
+  // fleet-wide topic (home list) and a per-route topic (route view). R2: a
+  // passenger tracking one route no longer receives the whole fleet's traffic.
+  const fleetSubRef = useRef(null)
+  const routeSubRef = useRef(null)
+
   // Ticks so "last seen" ages and stale badges stay honest.
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [])
 
-  // Route list for the search suggestions.
+  // Server-side route search (debounced), so the browser never downloads the
+  // whole network to autocomplete. Skips searching while the box just shows the
+  // already-selected route's name.
   useEffect(() => {
-    apiRequest('/api/routes').then(res => setRoutes(res.data || [])).catch(console.error)
+    const q = searchQuery.trim().replace(/^route\s+/i, '')
+    const skip = !q || (selectedRoute && searchQuery === selectedRoute.name)
+    let ignore = false
+    const id = setTimeout(() => {
+      if (skip) { setRoutes([]); return }
+      apiRequest(`/api/routes/search?q=${encodeURIComponent(q)}&limit=20`)
+        .then(res => { if (!ignore) setRoutes(res.data || []) })
+        .catch(() => { if (!ignore) setRoutes([]) })
+    }, skip ? 0 : 250)
+    return () => { ignore = true; clearTimeout(id) }
+  }, [searchQuery, selectedRoute])
+
+  // Loads the active-trip list and seeds each bus's last known position, so a
+  // passenger opening the app mid-trip sees buses immediately. Also used to
+  // catch up the home list after the fleet subscription was paused for a route.
+  const fetchActiveTrips = useCallback(async () => {
+    try {
+      const res = await apiRequest('/api/trips/active')
+      const trips = res.data || []
+      setActiveTrips(trips)
+      const states = await Promise.all(
+        trips.map((t) =>
+          apiRequest(`/api/trips/${t.id}/live`)
+            .then((r) => ({ id: t.id, live: r.data }))
+            .catch(() => null)
+        )
+      )
+      setActiveTrips((prev) =>
+        prev.map((t) => {
+          const seeded = states.find((s) => s && s.id === t.id)
+          // Never overwrite a fresher state that arrived over the socket first.
+          return seeded && !t.liveState ? { ...t, liveState: seeded.live } : t
+        })
+      )
+    } catch (err) {
+      console.error(err)
+    }
   }, [])
 
-  // Real-time WebSocket connection
-  useEffect(() => {
-    const fetchActiveTrips = async () => {
-      try {
-        const res = await apiRequest('/api/trips/active')
-        const trips = res.data || []
-        setActiveTrips(trips)
-
-        // Seed each bus's last known position from the API, so a passenger who
-        // opens the app mid-trip sees the bus straight away instead of an empty
-        // map until the conductor's next ping arrives over the socket.
-        const states = await Promise.all(
-          trips.map((t) =>
-            apiRequest(`/api/trips/${t.id}/live`)
-              .then((r) => ({ id: t.id, live: r.data }))
-              .catch(() => null)
-          )
-        )
-        setActiveTrips((prev) =>
-          prev.map((t) => {
-            const seeded = states.find((s) => s && s.id === t.id)
-            // Never overwrite a fresher state that arrived over the socket first.
-            return seeded && !t.liveState ? { ...t, liveState: seeded.live } : t
-          })
-        )
-      } catch (err) {
-        console.error(err)
+  // Route handler: updates ONLY the bus this message belongs to, keyed by trip
+  // id, so one bus's GPS can never move another bus's marker. Defends against a
+  // stray cross-route message even though the route topic is already filtered.
+  const applyRouteUpdate = useCallback((updatedTrip) => {
+    if (!updatedTrip.tripId) return
+    const route = selectedRouteRef.current
+    setRouteBuses((prev) => {
+      if (updatedTrip.status === 'completed') {
+        if (!prev[updatedTrip.tripId]) return prev
+        const next = { ...prev }
+        delete next[updatedTrip.tripId]   // trip ended - drop it from the route map
+        return next
       }
-    }
-    fetchActiveTrips()
-
-    connectWebSocket((stompClient) => {
-      stompClient.subscribe('/topic/bus-updates', (msg) => {
-        if (msg.body) {
-          const updatedTrip = JSON.parse(msg.body)
-          setActiveTrips((prevTrips) => {
-            const tripExists = prevTrips.some(t => t.id === (updatedTrip.id || updatedTrip.tripId))
-            if (updatedTrip.status === 'completed') {
-               return prevTrips.filter(t => t.id !== (updatedTrip.id || updatedTrip.tripId))
-            }
-            if (tripExists) {
-              return prevTrips.map(t => (t.id === (updatedTrip.id || updatedTrip.tripId)) ? { ...t, liveState: updatedTrip } : t)
-            }
-            // For brand new trips broadcasted
-            return [...prevTrips, { id: updatedTrip.tripId || updatedTrip.id, liveState: updatedTrip }]
-          })
-
-          // Route view: update ONLY the bus this message belongs to. Keyed by
-          // trip id, so one bus's GPS can never move another bus's marker.
-          const route = selectedRouteRef.current
-          if (route && updatedTrip.tripId) {
-            setRouteBuses((prev) => {
-              if (updatedTrip.status === 'completed') {
-                if (!prev[updatedTrip.tripId]) return prev
-                const next = { ...prev }
-                delete next[updatedTrip.tripId]   // trip ended - drop it from the route map
-                return next
-              }
-              if (updatedTrip.routeId !== route.id) return prev   // a bus on some other route
-              return { ...prev, [updatedTrip.tripId]: updatedTrip }
-            })
-          }
-        }
-      })
+      if (route && updatedTrip.routeId != null && updatedTrip.routeId !== route.id) return prev
+      return { ...prev, [updatedTrip.tripId]: updatedTrip }
     })
+  }, [])
 
+  // Fleet-wide handler: drives the home list. Unchanged behaviour - it still
+  // also updates the route map defensively (harmless; the route topic is the
+  // primary source while a route is selected).
+  const applyFleetUpdate = useCallback((updatedTrip) => {
+    setActiveTrips((prevTrips) => {
+      const tripExists = prevTrips.some(t => t.id === (updatedTrip.id || updatedTrip.tripId))
+      if (updatedTrip.status === 'completed') {
+        return prevTrips.filter(t => t.id !== (updatedTrip.id || updatedTrip.tripId))
+      }
+      if (tripExists) {
+        return prevTrips.map(t => (t.id === (updatedTrip.id || updatedTrip.tripId)) ? { ...t, liveState: updatedTrip } : t)
+      }
+      return [...prevTrips, { id: updatedTrip.tripId || updatedTrip.id, liveState: updatedTrip }]
+    })
+    const route = selectedRouteRef.current
+    if (route && updatedTrip.tripId) applyRouteUpdate(updatedTrip)
+  }, [applyRouteUpdate])
+
+  // Tears the socket down when the passenger leaves the page. The subscriptions
+  // themselves are (un)managed by the view effect below.
+  useEffect(() => {
     return () => {
+      fleetSubRef.current = null
+      routeSubRef.current = null
       disconnectWebSocket()
     }
   }, [])
 
+  // View-appropriate subscription: fleet-wide topic on the home view, the
+  // per-route topic while a route is selected. The two views never render at the
+  // same time, so pausing the fleet firehose during a route view is what cuts
+  // the passenger's traffic - the topic itself stays live for the admin fleet.
+  // The initial load and any catch-up refetch run inside the connect callback so
+  // no setState happens synchronously in the effect body.
+  useEffect(() => {
+    if (selectedRoute) {
+      connectWebSocket((client) => {
+        if (fleetSubRef.current) { fleetSubRef.current.unsubscribe(); fleetSubRef.current = null }
+        if (routeSubRef.current) { routeSubRef.current.unsubscribe(); routeSubRef.current = null }
+        routeSubRef.current = client.subscribe(`/topic/route_${selectedRoute.id}`, (msg) => {
+          if (msg.body) applyRouteUpdate(JSON.parse(msg.body))
+        })
+      })
+      return () => {
+        if (routeSubRef.current) { routeSubRef.current.unsubscribe(); routeSubRef.current = null }
+      }
+    }
+
+    // Home view: (re)subscribe to the fleet topic if not already, then load the
+    // active-trip list (on first mount) or catch it up (returning from a route,
+    // when the fleet firehose was paused).
+    connectWebSocket((client) => {
+      if (!fleetSubRef.current) {
+        fleetSubRef.current = client.subscribe('/topic/bus-updates', (msg) => {
+          if (msg.body) applyFleetUpdate(JSON.parse(msg.body))
+        })
+      }
+      fetchActiveTrips()
+    })
+  }, [selectedRoute, fetchActiveTrips, applyFleetUpdate, applyRouteUpdate])
+
   // --- Route search ---
+  // Endpoints for display. Search results are lightweight ({id,name}) with no
+  // nested stops, so parse origin → destination from the name when present
+  // (BMTC names read "285 · Origin → Destination"); fall back to fetched stops.
+  const endpointsFromName = (name) => {
+    if (!name) return null
+    const afterDot = name.includes('·') ? name.split('·').slice(1).join('·').trim() : name
+    if (afterDot.includes('→')) {
+      const [from, to] = afterDot.split('→').map(s => s.trim())
+      if (from && to) return { from, to }
+    }
+    return null
+  }
   const routeEndpoints = (r) => {
-    const s = [...(r.routeStops || [])].sort((a, b) => (a.stopOrder ?? 0) - (b.stopOrder ?? 0))
+    const fromName = endpointsFromName(r?.name)
+    if (fromName) return fromName
+    const s = [...(r?.routeStops || routeStops || [])]
     if (s.length < 2) return null
-    return { from: s[0].stop?.name, to: s[s.length - 1].stop?.name }
+    const first = s[0].stop?.name || s[0].name
+    const last = s[s.length - 1].stop?.name || s[s.length - 1].name
+    return first && last ? { from: first, to: last } : null
   }
 
-  const routeSuggestions = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase().replace(/^route\s+/, '')
-    if (!q) return []
-    return routes
-      .filter(r => (r.name || '').toLowerCase().includes(q))
-      .slice(0, 8)
-  }, [searchQuery, routes])
+  // Suggestions come straight from the server (already limited); no client filter.
+  const routeSuggestions = routes
 
   const selectRoute = async (route) => {
     setSelectedRoute(route)
@@ -340,22 +445,28 @@ function Home() {
     setShowSuggestions(false)
     setSearchQuery(route.name)
     setRouteLoading(true)
+    setRouteStops([])
     setRouteBuses({})
     setFocusedTripId(null)
-    try {
-      const res = await apiRequest(`/api/routes/${route.id}/active-buses`)
+    // Static stops and live buses are independent: the route (and its stops)
+    // must show even when zero buses are running.
+    const [detail, live] = await Promise.allSettled([
+      apiRequest(`/api/routes/${route.id}`),
+      apiRequest(`/api/routes/${route.id}/active-buses`),
+    ])
+    if (detail.status === 'fulfilled') setRouteStops(detail.value.data?.stops || [])
+    else console.error(detail.reason)
+    if (live.status === 'fulfilled') {
       const next = {}
-      for (const b of res.data || []) next[b.tripId] = b
+      for (const b of live.value.data || []) next[b.tripId] = b
       setRouteBuses(next)
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setRouteLoading(false)
-    }
+    } else console.error(live.reason)
+    setRouteLoading(false)
   }
 
   const clearRoute = () => {
     setSelectedRoute(null)
+    setRouteStops([])
     setRouteBuses({})
     setSearchQuery('')
     setPanTarget(null)
@@ -378,8 +489,23 @@ function Home() {
   )
   const spread = useMemo(() => spreadOverlaps(mappable), [mappable])
   // Re-fit bounds when the set of buses changes, not on every position tick.
-  const fitKey = useMemo(() => mappable.map(b => b.tripId).sort().join(','), [mappable])
   const positions = useMemo(() => mappable.map(b => [b.currentLat, b.currentLon]), [mappable])
+
+  // Static stop geometry for the selected route, so the route path is visible
+  // even when no bus is live. Independent of the live bus markers.
+  const stopPositions = useMemo(
+    () => routeStops.filter(s => s.lat != null && s.lon != null).map(s => [s.lat, s.lon]),
+    [routeStops]
+  )
+  // Fit to the live buses when there are any, otherwise to the route's stops.
+  const fitPositions = positions.length ? positions : stopPositions
+  const fitKey = useMemo(
+    () => (positions.length
+      ? 'b:' + mappable.map(b => b.tripId).sort().join(',')
+      : 's:' + (selectedRoute?.id ?? '') + ':' + stopPositions.length),
+    [mappable, positions.length, stopPositions.length, selectedRoute]
+  )
+  const hasMap = mappable.length > 0 || stopPositions.length > 0
 
   const filteredTrips = useMemo(() => {
     if (!searchQuery) return activeTrips
@@ -477,19 +603,38 @@ function Home() {
         {selectedRoute ? (
           <div className="flex flex-col h-full min-h-0">
             <div className="flex-1 w-full relative bg-dark min-h-[300px]">
-              {mappable.length > 0 ? (
+              {hasMap ? (
                 <MapContainer
-                  center={[mappable[0].currentLat, mappable[0].currentLon]}
+                  center={mappable.length > 0
+                    ? [mappable[0].currentLat, mappable[0].currentLon]
+                    : stopPositions[0]}
                   zoom={13}
                   style={{ height: '100%', width: '100%', zIndex: 1 }}
                   key={`route-${selectedRoute.id}`}
                 >
-                  <FitToBuses positions={positions} fitKey={fitKey} />
+                  <FitToBuses positions={fitPositions} fitKey={fitKey} />
                   <PanTo target={panTarget} />
                   <TileLayer
                     url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                   />
+                  {/* Static route path + stops (behind the live bus markers). */}
+                  {stopPositions.length > 1 && (
+                    <Polyline positions={stopPositions} pathOptions={{ color: '#1a73e8', weight: 3, opacity: 0.35 }} />
+                  )}
+                  {routeStops.filter(s => s.lat != null && s.lon != null).map((s) => (
+                    <CircleMarker
+                      key={`stop-${s.id}`}
+                      center={[s.lat, s.lon]}
+                      radius={4}
+                      pathOptions={{ color: '#1a73e8', weight: 1.5, fillColor: '#ffffff', fillOpacity: 1 }}
+                    >
+                      <Popup>
+                        <div className="text-xs font-semibold">{s.name}</div>
+                        <div className="text-xs text-text-secondary">Stop {s.stopOrder}</div>
+                      </Popup>
+                    </CircleMarker>
+                  ))}
                   {spread.map((b) => (
                     <Marker
                       key={b.tripId}
@@ -506,6 +651,7 @@ function Home() {
                         <div className="text-sm numeric">
                           {b.availableSeats ?? '—'} of {b.maxCapacity ?? '—'} seats free
                         </div>
+                        <NextStopAlighting b={b} compact />
                         {b.remainingStopsEta?.[0] && (
                           <div className="text-sm numeric">
                             {b.remainingStopsEta[0].stopName} in {b.remainingStopsEta[0].estimatedMinutes} min
@@ -528,13 +674,13 @@ function Home() {
                     <Bus size={28} className="opacity-30" />
                   </div>
                   <p className="font-semibold text-text-primary mb-1">
-                    {routeLoading ? 'Finding active buses' : routeBusList.length === 0 ? 'No buses running' : 'Waiting for GPS'}
+                    {routeLoading ? 'Loading route' : routeBusList.length === 0 ? 'No buses currently live' : 'Waiting for GPS'}
                   </p>
                   <p className="text-sm max-w-xs">
                     {routeLoading
-                      ? 'Checking which buses are on this route.'
+                      ? 'Fetching this route and its stops.'
                       : routeBusList.length === 0
-                        ? 'No buses are currently active on this route.'
+                        ? 'No buses are currently live on this route. Stops for this route have no coordinates to map yet.'
                         : 'These buses have not reported a position yet.'}
                   </p>
                 </div>
@@ -606,6 +752,7 @@ function Home() {
                 <div className="card p-4">
                   <p className="eyebrow mb-2">Next Stop</p>
                   <p className="font-semibold text-accent truncate">{selectedTrip.liveState?.nextStopName || 'Detecting…'}</p>
+                  <NextStopAlighting b={selectedTrip.liveState} compact />
                 </div>
               </div>
 
@@ -682,16 +829,31 @@ function Home() {
                 <div className="skeleton h-32 w-full" />
                 <div className="skeleton h-32 w-full" />
               </>
-            ) : routeBusList.length === 0 ? (
-              <div className="empty-state">
-                <div className="w-14 h-14 rounded-full bg-hover flex items-center justify-center mb-4">
-                  <Bus size={24} className="opacity-40" />
-                </div>
-                <p className="font-semibold text-text-primary mb-1">No buses running</p>
-                <p className="text-sm">No buses are currently active on this route.</p>
-              </div>
             ) : (
-              routeBusList.map((b) => <BusCard key={b.tripId} b={b} now={now} focused={focusedTripId === b.tripId} onFocus={focusBus} />)
+              <>
+                {routeBusList.length === 0 ? (
+                  <div className="rounded-xl border border-border-subtle bg-dark px-4 py-3 text-sm text-text-secondary flex items-center gap-2">
+                    <span className="status-dot bg-offline" />
+                    No buses currently live on this route.
+                  </div>
+                ) : (
+                  routeBusList.map((b) => <BusCard key={b.tripId} b={b} now={now} focused={focusedTripId === b.tripId} onFocus={focusBus} />)
+                )}
+                {routeStops.length > 0 && (
+                  <div className="card p-4">
+                    <p className="eyebrow mb-3">{routeStops.length} stops on this route</p>
+                    <ol className="space-y-2">
+                      {routeStops.map((s) => (
+                        <li key={`rs-${s.id}`} className="flex items-center gap-2.5 text-sm">
+                          <span className="numeric text-xs text-text-muted w-5 shrink-0">{s.stopOrder}</span>
+                          <span className={`status-dot shrink-0 ${s.lat != null ? 'bg-accent' : 'bg-offline'}`} />
+                          <span className="truncate">{s.name}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+              </>
             )
           ) : filteredTrips.length === 0 ? (
             <div className="empty-state">

@@ -33,7 +33,11 @@ public class LiveTripStateDto {
     private Integer maxCapacity;
     private Integer currentOccupancy;
     private Integer availableSeats;
-    
+
+    // --- Expected alighting at the next stop (additive; derived from ACTIVE tickets, not predicted) ---
+    private Integer expectedPassengersGettingDownAtNextStop; // passengers on ACTIVE tickets whose destination is nextStopId (0 when no next stop)
+    private Integer expectedAvailableSeatsAfterNextStop;     // availableSeats + the above, capped at maxCapacity; occupancy itself is unchanged until they alight
+
     // Prediction & Crowd
     private String crowdLevel; // LOW, MEDIUM, HIGH, FULL (live, from current occupancy)
 

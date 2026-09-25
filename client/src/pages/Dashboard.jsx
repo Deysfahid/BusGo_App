@@ -48,10 +48,15 @@ export default function Dashboard() {
   const token = localStorage.getItem('busgo_token')
   const [buses, setBuses] = useState([])
   const [activeTrips, setActiveTrips] = useState([])
-  const [routes, setRoutes] = useState([])
-  
+
   const [activeBusId, setActiveBusId] = useState('')
   const [activeRouteId, setActiveRouteId] = useState('')
+  // Route is chosen via server-side search, so the dropdown never loads the whole
+  // (potentially thousands-strong) network.
+  const [routeQuery, setRouteQuery] = useState('')
+  const [routeName, setRouteName] = useState('')
+  const [routeResults, setRouteResults] = useState([])
+  const [showRouteSuggest, setShowRouteSuggest] = useState(false)
   const [passengerCount, setPassengerCount] = useState(1)
   const [issuing, setIssuing] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -76,14 +81,12 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     try {
-      const [busRes, tripsRes, routesRes] = await Promise.all([
+      const [busRes, tripsRes] = await Promise.all([
         apiRequest('/api/buses', { authToken: token }),
         apiRequest('/api/trips/active', { authToken: token }),
-        apiRequest('/api/routes', { authToken: token }),
       ])
       setBuses(busRes.buses || busRes.data || [])
       setActiveTrips(tripsRes.data || [])
-      setRoutes(routesRes.data || [])
     } catch (error) {
       console.error(error)
     } finally {
@@ -94,6 +97,20 @@ export default function Dashboard() {
   useEffect(() => {
     if (token) fetchData()
   }, [token])
+
+  // Debounced server-side route search for the conductor's route picker.
+  useEffect(() => {
+    const q = routeQuery.trim().replace(/^route\s+/i, '')
+    const skip = !q || q === routeName
+    let ignore = false
+    const id = setTimeout(() => {
+      if (skip) { setRouteResults([]); return }
+      apiRequest(`/api/routes/search?q=${encodeURIComponent(q)}&limit=20`, { authToken: token })
+        .then(res => { if (!ignore) setRouteResults(res.data || []) })
+        .catch(() => { if (!ignore) setRouteResults([]) })
+    }, skip ? 0 : 250)
+    return () => { ignore = true; clearTimeout(id) }
+  }, [routeQuery, routeName, token])
 
   const activeBus = buses.find(b => String(b.id) === String(activeBusId))
   const activeTrip = activeTrips.find(t => String(t.bus?.id || t.busId) === String(activeBusId))
@@ -475,19 +492,47 @@ export default function Dashboard() {
               </select>
             </div>
 
-            <div>
-              <label htmlFor="route-select" className="label">Route</label>
-              <select
-                id="route-select"
-                className="select"
-                value={activeRouteId}
-                onChange={(e) => setActiveRouteId(e.target.value)}
-              >
-                <option value="" className="bg-dark text-text-primary">Select route...</option>
-                {routes.map(r => (
-                  <option key={r.id} value={r.id} className="bg-dark text-text-primary">Route {r.name}</option>
-                ))}
-              </select>
+            <div className="relative">
+              <label htmlFor="route-search" className="label">Route</label>
+              <input
+                id="route-search"
+                type="text"
+                className="input"
+                placeholder="Search route number or name..."
+                autoComplete="off"
+                value={routeQuery}
+                onChange={(e) => {
+                  setRouteQuery(e.target.value)
+                  setShowRouteSuggest(true)
+                  // typing a new query invalidates any prior selection
+                  if (activeRouteId) { setActiveRouteId(''); setRouteName('') }
+                }}
+                onFocus={() => setShowRouteSuggest(true)}
+              />
+              {activeRouteId && (
+                <p className="mt-1 text-xs text-live flex items-center gap-1.5">
+                  <span className="status-dot bg-live" /> Selected: {routeName}
+                </p>
+              )}
+              {showRouteSuggest && routeResults.length > 0 && (
+                <div className="absolute z-[500] left-0 right-0 mt-1 card shadow-lift overflow-hidden max-h-64 overflow-y-auto">
+                  {routeResults.map(r => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveRouteId(String(r.id))
+                        setRouteName(r.name)
+                        setRouteQuery(r.name)
+                        setShowRouteSuggest(false)
+                      }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-hover transition-colors border-b border-border-subtle last:border-b-0 text-sm truncate"
+                    >
+                      {r.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <button

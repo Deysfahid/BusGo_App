@@ -259,6 +259,12 @@ public class TripService {
         com.busgo.server.dto.LiveTripStateDto dto = locationService.getCurrentState(trip);
         messagingTemplate.convertAndSend("/topic/bus_" + trip.getBus().getId(), dto);
         messagingTemplate.convertAndSend("/topic/bus-updates", dto);
+        // R2 (additive): mirror to the per-route topic so route subscribers see
+        // ticket/stop/occupancy/end changes too, not just GPS pings. Same DTO.
+        Long routeId = dto.getRouteId();
+        if (routeId != null) {
+            messagingTemplate.convertAndSend("/topic/route_" + routeId, dto);
+        }
     }
 }
 

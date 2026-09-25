@@ -56,9 +56,15 @@ public class WebSocketController {
             }
 
             // Per-bus topic for the conductor, plus the fleet-wide topic that the
-            // passenger and admin views follow.
+            // admin view follows. Both are preserved exactly as before.
             messagingTemplate.convertAndSend("/topic/bus_" + locationUpdate.getBusId(), enrichedState);
             messagingTemplate.convertAndSend("/topic/bus-updates", enrichedState);
+            // R2 (additive): a per-route topic so a passenger tracking one route
+            // receives only that route's buses instead of the whole fleet. Same DTO.
+            Long routeId = enrichedState.getRouteId();
+            if (routeId != null) {
+                messagingTemplate.convertAndSend("/topic/route_" + routeId, enrichedState);
+            }
         } catch (Exception e) {
             // Without this the messaging layer swallows the failure and the bus
             // silently stops advancing through its stops.

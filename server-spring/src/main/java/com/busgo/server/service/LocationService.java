@@ -35,6 +35,7 @@ public class LocationService {
     private final RouteStopRepository routeStopRepository;
     private final TripRepository tripRepository;
     private final BusLocationRepository busLocationRepository;
+    private final AlightingService alightingService;
 
     @Value("${busgo.geofence.radius:175}")
     private double geofenceRadiusMeters;
@@ -60,6 +61,27 @@ public class LocationService {
 
     /** Latest known position per trip id. */
     private final Map<Long, LastFix> latestLocations = new ConcurrentHashMap<>();
+
+    /**
+     * How long must pass before another GPS ping for the same trip is written to
+     * {@code bus_locations}. This throttles ONLY the database write - every ping is
+     * still processed (geofence, ETA) and broadcast in full. The table's only
+     * readers are "newest position on restart" and the abandoned-trip sweep, so a
+     * dense per-second history buys nothing. Kept below the client's 20 s stale
+     * threshold so a position recovered from the DB after a restart still reads as
+     * live.
+     */
+    private static final long PERSIST_MIN_INTERVAL_MS = 15_000L;
+
+    /** Sentinel for "this trip has never been persisted, in memory or in the DB". */
+    private static final long NEVER_PERSISTED = Long.MIN_VALUE;
+
+    /**
+     * When each trip's position was last WRITTEN to the database (epoch millis).
+     * Keyed by trip id so throttling is strictly per-trip; one bus can never
+     * suppress or trigger another's write.
+     */
+    private final Map<Long, Long> lastPersistedAtByTrip = new ConcurrentHashMap<>();
 
     /**
      * Transactional entry point for a GPS ping arriving on the STOMP endpoint.
@@ -91,14 +113,60 @@ public class LocationService {
             return null;
         }
 
-        busLocationRepository.save(BusLocation.builder()
-                .trip(trip)
-                .latitude(lat)
-                .longitude(lon)
-                .timestamp(LocalDateTime.now())
-                .build());
+        // Persistence is throttled to at most once per PERSIST_MIN_INTERVAL_MS per
+        // trip. GPS PROCESSING IS NOT THROTTLED: processLocationUpdate below runs on
+        // every single ping, so geofence/dwell/arrival detection, the in-memory live
+        // position cache and the WebSocket broadcast all behave exactly as before.
+        if (shouldPersist(trip.getId())) {
+            busLocationRepository.save(BusLocation.builder()
+                    .trip(trip)
+                    .latitude(lat)
+                    .longitude(lon)
+                    .timestamp(LocalDateTime.now())
+                    .build());
+        }
 
         return processLocationUpdate(trip, lat, lon, accuracy);
+    }
+
+    /**
+     * Decides, atomically per trip, whether this ping should be written to the
+     * database, and records the decision so the next ping is measured from it.
+     *
+     * <p>The first ping of a trip is always persisted. On a cold start the in-memory
+     * timestamp is absent, so the newest row already in {@code bus_locations} is
+     * consulted before deciding - recovery comes from the persisted timestamp, never
+     * from an assumption that the last write happened in this process. Concurrent
+     * pings for the same trip are serialised by {@link ConcurrentHashMap#compute}
+     * on the trip's key, so exactly one of them can claim a given write slot; pings
+     * for different trips take different keys and never contend.</p>
+     */
+    private boolean shouldPersist(Long tripId) {
+        long now = System.currentTimeMillis();
+        boolean[] persist = {false};
+        lastPersistedAtByTrip.compute(tripId, (id, cachedLast) -> {
+            long last = (cachedLast != null) ? cachedLast : lastPersistedAtFromDb(tripId);
+            if (last == NEVER_PERSISTED || now - last >= PERSIST_MIN_INTERVAL_MS) {
+                persist[0] = true;
+                return now;                 // this ping claims the slot
+            }
+            return last;                    // keep the last write time; skip persisting
+        });
+        return persist[0];
+    }
+
+    /**
+     * Newest persisted position time for a trip as epoch millis, or
+     * {@link #NEVER_PERSISTED} when the trip has no stored rows. Read once per trip
+     * (on the first ping after a restart); thereafter the in-memory timestamp is used.
+     */
+    private long lastPersistedAtFromDb(Long tripId) {
+        return busLocationRepository.findTopByTripIdOrderByTimestampDesc(tripId)
+                .map(bl -> bl.getTimestamp()
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli())
+                .orElse(NEVER_PERSISTED);
     }
 
     /**
@@ -130,6 +198,7 @@ public class LocationService {
         }
         if (tripId != null) {
             latestLocations.remove(tripId);
+            lastPersistedAtByTrip.remove(tripId);
         }
     }
 
@@ -324,6 +393,15 @@ public class LocationService {
         int availSeats = Math.max(0, maxCap - trip.getCurrentOccupancy());
         String crowdLvl = predictionService.predictCrowdLevel(trip, availSeats, maxCap);
 
+        // Passengers who will get off at the next stop, read from the tickets on
+        // board. Only meaningful while the trip is active and a next stop exists;
+        // otherwise it is 0 and the expected-seat figure equals the live one.
+        Long nextStopIdForAlighting = nextRouteStop != null ? nextRouteStop.getStop().getId() : null;
+        int alightingAtNext = "active".equals(trip.getStatus())
+                ? alightingService.countPassengersAlightingAt(trip.getId(), nextStopIdForAlighting)
+                : 0;
+        int expectedSeatsAfterNext = AlightingService.expectedSeatsAfter(availSeats, alightingAtNext, maxCap);
+
         // Phase 8: attach ML-predicted occupancy to each upcoming stop, and derive
         // a forward-looking crowd level for the next stop. Falls back gracefully
         // (null predictions / live crowd label) when the model is not yet trained.
@@ -361,6 +439,8 @@ public class LocationService {
                 .maxCapacity(maxCap)
                 .currentOccupancy(trip.getCurrentOccupancy())
                 .availableSeats(availSeats)
+                .expectedPassengersGettingDownAtNextStop(alightingAtNext)
+                .expectedAvailableSeatsAfterNextStop(expectedSeatsAfterNext)
                 .crowdLevel(crowdLvl)
                 .predictedCrowdLevel(predictedCrowd)
                 .modelActive(modelActive)
