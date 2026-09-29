@@ -28,6 +28,10 @@ public class DataSeeder implements CommandLineRunner {
     private final StopRepository stopRepository;
     private final RouteStopRepository routeStopRepository;
     private final PasswordEncoder passwordEncoder;
+    private final com.busgo.server.service.StaffAuthorizationService staffAuthorizationService;
+
+    @org.springframework.beans.factory.annotation.Value("${busgo.initial-admin-email:${BUSGO_INITIAL_ADMIN_EMAIL:}}")
+    private String initialAdminEmail;
 
     /**
      * Catalogue of well-known Bengaluru stops: {name, latitude, longitude}.
@@ -112,6 +116,19 @@ public class DataSeeder implements CommandLineRunner {
         seedDummyData();
         seedStopCatalog();
         seedCatalogRoutes();
+        seedInitialAdminAuthorization();
+    }
+
+    /**
+     * Ensures the env-configured initial admin email is an active ADMIN in the staff
+     * allowlist, so that account becomes ADMIN on its first Google sign-in. Idempotent
+     * and skipped when the env var is unset.
+     */
+    private void seedInitialAdminAuthorization() {
+        if (initialAdminEmail == null || initialAdminEmail.isBlank()) {
+            return;
+        }
+        staffAuthorizationService.ensureAdmin(initialAdminEmail.trim(), "system");
     }
 
     /**

@@ -31,7 +31,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                     UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
-                    if (jwtUtils.validateToken(jwt, userDetails)) {
+                    // A deactivated account (isEnabled()==false) is refused even with an
+                    // otherwise-valid, unexpired JWT, because the user is re-loaded here.
+                    if (userDetails.isEnabled() && jwtUtils.validateToken(jwt, userDetails)) {
                         UsernamePasswordAuthenticationToken authentication =
                                 new UsernamePasswordAuthenticationToken(
                                         userDetails,

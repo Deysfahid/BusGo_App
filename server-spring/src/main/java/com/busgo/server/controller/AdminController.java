@@ -1,7 +1,11 @@
 package com.busgo.server.controller;
 
+import com.busgo.server.dto.AddStaffRequest;
 import com.busgo.server.dto.ApiResponse;
 import com.busgo.server.dto.OsmStopDto;
+import com.busgo.server.dto.StaffAuthorizationDto;
+import com.busgo.server.service.StaffAuthorizationService;
+import org.springframework.security.core.Authentication;
 import com.busgo.server.entity.Bus;
 import com.busgo.server.entity.Role;
 import com.busgo.server.entity.Route;
@@ -41,6 +45,7 @@ public class AdminController {
     private final UserRepository userRepository;
     private final OsmStopImportService osmStopImportService;
     private final TripService tripService;
+    private final StaffAuthorizationService staffAuthorizationService;
 
     // --- DASHBOARD STATS ---
     @GetMapping("/stats")
@@ -186,6 +191,37 @@ public class AdminController {
     @PostMapping("/stops")
     public ResponseEntity<ApiResponse<Stop>> createStop(@RequestBody Stop stop) {
         return ResponseEntity.ok(ApiResponse.success(stopRepository.save(stop)));
+    }
+
+    // --- STAFF MANAGEMENT (Google Sign-In allowlist) ---
+
+    /** All staff authorizations (ADMIN/CONDUCTOR) with their active + signed-up status. */
+    @GetMapping("/staff")
+    public ResponseEntity<ApiResponse<List<StaffAuthorizationDto>>> listStaff() {
+        return ResponseEntity.ok(ApiResponse.success(staffAuthorizationService.list()));
+    }
+
+    /** Authorize an email as ADMIN or CONDUCTOR so they can sign up via Google. */
+    @PostMapping("/staff")
+    public ResponseEntity<ApiResponse<StaffAuthorizationDto>> addStaff(
+            @RequestBody AddStaffRequest request, Authentication auth) {
+        String by = auth != null ? auth.getName() : null;
+        return ResponseEntity.ok(ApiResponse.success("Staff authorized",
+                staffAuthorizationService.authorize(request.getEmail(), request.getRole(), by)));
+    }
+
+    /** Deactivate a staff member: they lose access to protected APIs immediately. */
+    @PostMapping("/staff/{id}/deactivate")
+    public ResponseEntity<ApiResponse<StaffAuthorizationDto>> deactivateStaff(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Staff deactivated",
+                staffAuthorizationService.setActive(id, false)));
+    }
+
+    /** Reactivate a previously deactivated staff member. */
+    @PostMapping("/staff/{id}/reactivate")
+    public ResponseEntity<ApiResponse<StaffAuthorizationDto>> reactivateStaff(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Staff reactivated",
+                staffAuthorizationService.setActive(id, true)));
     }
 
     // --- CONDUCTORS CRUD ---

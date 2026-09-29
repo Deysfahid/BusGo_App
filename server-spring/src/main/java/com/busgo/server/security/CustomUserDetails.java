@@ -52,6 +52,8 @@ public class CustomUserDetails implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return true;
+        // Deactivated accounts are rejected on the next request, because the JWT
+        // filter re-loads the user from the DB and checks this flag.
+        return user.isActive();
     }
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { apiRequest } from '../lib/api'
-import { Search, MapPin, Clock, Navigation, Bus, Sparkles, X, Users, ArrowRight, ArrowDown, Armchair } from 'lucide-react'
+import { Search, MapPin, Clock, Navigation, Bus, Sparkles, X, Users, ArrowRight, ArrowDown, Armchair, Star, Share2 } from 'lucide-react'
 import { connectWebSocket, disconnectWebSocket } from '../lib/websocket'
 import { MapContainer, TileLayer, Marker, Popup, useMap, CircleMarker, Polyline } from 'react-leaflet'
 import L from 'leaflet'
@@ -211,24 +212,261 @@ const NextStopAlighting = ({ b, compact = false }) => {
   )
 }
 
+/* --- Favourites & recent searches (browser-only) ---
+   Stored in localStorage as a minimal [{id, name}] list. Nothing sensitive is
+   ever written here: no tokens, credentials, coordinates, personal data or live
+   bus state. Reads are defensive - corrupt, foreign or disabled storage simply
+   behaves as "empty" instead of breaking the page. */
+const FAV_KEY = 'busgo_favorite_routes'
+const RECENT_KEY = 'busgo_recent_routes'
+const MAX_RECENT = 5
+
+const readRouteList = (key) => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]')
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter(r => r && (typeof r.id === 'number' || typeof r.id === 'string') && typeof r.name === 'string')
+      .map(r => ({ id: r.id, name: r.name }))
+  } catch {
+    return []   // malformed JSON, or storage blocked (private mode)
+  }
+}
+const writeRouteList = (key, list) => {
+  try { localStorage.setItem(key, JSON.stringify(list)) } catch { /* storage unavailable */ }
+}
+
+/** Great-circle distance in metres (same formula the backend geofence uses). */
+const haversineMeters = (lat1, lon1, lat2, lon2) => {
+  const R = 6371000, r = Math.PI / 180
+  const dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+/** Under 1 km → rounded metres; otherwise kilometres to one decimal. */
+const formatDistance = (m) =>
+  m < 1000 ? `${Math.round(m / 10) * 10} m away` : `${(m / 1000).toFixed(1)} km away`
+
+/** Origin → destination parsed from a route name, when the name carries it. */
+const endpointsFromName = (name) => {
+  if (!name) return null
+  const afterDot = name.includes('·') ? name.split('·').slice(1).join('·').trim() : name
+  // Accept "Origin → Destination" (BMTC) or "Origin - Destination" (seeded names).
+  const sep = afterDot.includes('→') ? '→' : (/\s-\s/.test(afterDot) ? ' - ' : null)
+  if (sep) {
+    const [from, to] = afterDot.split(sep).map(s => s.trim())
+    if (from && to) return { from, to }
+  }
+  return null
+}
+
+/* A compact list of saved routes (favourites or recents). Selecting one calls the
+   SAME selectRoute the search dropdown uses, so the route opens identically. */
+const SavedRouteList = ({ title, Icon, routes, liveCountFor, isFav, onSelect, onToggleFav, onClear }) => {
+  if (!routes.length) return null
+  return (
+    <div className="card p-4">
+      <p className="eyebrow mb-2.5 flex items-center gap-1.5">
+        <Icon size={13} /> {title}
+        {onClear && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="ml-auto normal-case tracking-normal text-text-muted hover:text-text-primary transition-colors"
+          >
+            Clear
+          </button>
+        )}
+      </p>
+      <div className="space-y-1.5">
+        {routes.map((r) => {
+          const ends = endpointsFromName(r.name)
+          const live = liveCountFor(r.id)
+          const fav = isFav(r.id)
+          return (
+            <div key={`${title}-${r.id}`} className="flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                onClick={() => onSelect(r)}
+                aria-label={`Open route ${r.name}`}
+                className="flex-1 min-w-0 text-left rounded-lg px-2.5 py-2 hover:bg-hover transition-colors"
+              >
+                <span className="block text-sm font-medium truncate">
+                  {(r.name || '').split('·')[0].trim() || r.name}
+                </span>
+                <span className="flex items-center gap-2 text-xs text-text-secondary min-w-0">
+                  {ends && <span className="truncate">{ends.from} → {ends.to}</span>}
+                  {live > 0 && (
+                    <span className="flex items-center gap-1 shrink-0 text-live font-medium">
+                      <span className="status-dot bg-live" />{live} live
+                    </span>
+                  )}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleFav(r)}
+                aria-label={fav ? `Remove ${r.name} from favourites` : `Add ${r.name} to favourites`}
+                aria-pressed={fav}
+                className={`shrink-0 p-2 rounded-lg transition-colors ${
+                  fav ? 'text-stale hover:bg-hover' : 'text-text-muted hover:text-text-primary hover:bg-hover'
+                }`}
+              >
+                <Star size={16} fill={fav ? 'currentColor' : 'none'} />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* --- Bus Decision Assistant ---
+   A compact side-by-side comparison of the live buses on the selected route, so a
+   passenger can pick one at a glance. It PRESENTS existing values only - occupancy,
+   seats, alighting, next stop and ETA all come from the same live-trip state the
+   cards and markers use. Nothing is predicted or recalculated here; the ordering is
+   just a sort over those existing numbers. Rendered only when a bus is live. */
+const BusDecisionAssistant = ({ buses, now, focusedTripId, onFocus }) => {
+  if (!buses.length) return null
+
+  // Rank by the seats a boarder can expect after the next stop, then by seats now.
+  // Both figures come from the backend; this only orders them.
+  const ranked = [...buses].sort((a, b) => {
+    const af = a.expectedAvailableSeatsAfterNextStop ?? a.availableSeats ?? 0
+    const bf = b.expectedAvailableSeatsAfterNextStop ?? b.availableSeats ?? 0
+    if (bf !== af) return bf - af
+    return (b.availableSeats ?? 0) - (a.availableSeats ?? 0)
+  })
+  const compare = buses.length > 1
+
+  return (
+    <div className="card p-4">
+      <p className="eyebrow mb-3 flex items-center gap-1.5">
+        <Users size={13} /> Bus decision assistant
+        <span className="ml-auto normal-case tracking-normal text-text-muted">
+          {buses.length} live {buses.length === 1 ? 'bus' : 'buses'}
+        </span>
+      </p>
+
+      <div className="space-y-2">
+        {ranked.map((b, i) => {
+          const gps = gpsStateOf(b, now)
+          const cap = b.maxCapacity ?? 50
+          const occ = b.currentOccupancy ?? 0
+          const seats = b.availableSeats ?? Math.max(0, cap - occ)
+          const down = b.nextStopId != null ? b.expectedPassengersGettingDownAtNextStop : null
+          const after = b.expectedAvailableSeatsAfterNextStop
+          const eta = b.remainingStopsEta?.[0]
+          return (
+            <button
+              key={b.tripId}
+              onClick={() => onFocus(b)}
+              aria-label={`Focus ${b.busNumber || 'bus'} on the map`}
+              className={`w-full text-left rounded-xl border px-3 py-2.5 transition-colors ${
+                focusedTripId === b.tripId
+                  ? 'border-accent bg-accent/[0.06]'
+                  : 'border-border-subtle hover:bg-hover'
+              }`}
+            >
+              <div className="flex items-center gap-2 mb-1.5 min-w-0">
+                <span className="font-semibold text-sm truncate">{b.busNumber || `Bus #${b.busId}`}</span>
+                {compare && i === 0 && <span className="badge-accent shrink-0">Most seats</span>}
+                <span className={`ml-auto shrink-0 ${gps === 'live' ? 'badge-live' : gps === 'stale' ? 'badge-stale' : 'badge-offline'}`}>
+                  <span className={`status-dot ${gps === 'live' ? 'bg-live pulse-live' : gps === 'stale' ? 'bg-stale' : 'bg-offline'}`} />
+                  {gps === 'live' ? 'Live' : gps === 'stale' ? 'Stale' : 'No GPS'}
+                </span>
+              </div>
+
+              {/* Responsive: stacks on narrow screens, two columns when there is room */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <span className="text-text-secondary">
+                  <span className="numeric font-semibold text-text-primary">{occ}/{cap}</span> occupied
+                </span>
+                <span className="text-text-secondary">
+                  <span className="numeric font-semibold text-text-primary">{seats}</span> {seats === 1 ? 'seat' : 'seats'} available
+                </span>
+                <span className="text-text-secondary truncate">
+                  Next: <span className="text-accent font-medium">{b.nextStopName || 'End of route'}</span>
+                </span>
+                {eta && (
+                  <span className="text-text-secondary">
+                    ETA <span className="numeric font-semibold text-text-primary">{eta.estimatedMinutes} min</span>
+                  </span>
+                )}
+                {down != null && (
+                  <span className="text-text-secondary flex items-center gap-1">
+                    <ArrowDown size={11} className="text-accent shrink-0" />
+                    <span className="numeric font-semibold text-text-primary">{down}</span>
+                    &nbsp;getting down
+                  </span>
+                )}
+                {after != null && down != null && (
+                  <span className="text-text-secondary flex items-center gap-1">
+                    <Armchair size={11} className="shrink-0" />
+                    Est. after next stop:&nbsp;
+                    <span className="numeric font-semibold text-text-primary">{after}</span>
+                  </span>
+                )}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      <p className="mt-2.5 text-[11px] text-text-muted">
+        “Est. after next stop” is an estimate from tickets already issued — actual seats may differ.
+      </p>
+    </div>
+  )
+}
+
+/* Seat-confidence chip: a one-glance read of how likely a boarder is to get a
+   seat. Presentation only - it reuses existing DTO values and invents nothing.
+   "Best near-term free seats" = the greater of seats now (availableSeats) and
+   seats expected after the next stop's alighting - so a bus that's full now but
+   empties at the next stop still reads honestly. Returns null when the data is
+   missing, so no misleading status is shown. */
+const seatConfidence = (b) => {
+  const cap = b?.maxCapacity
+  const best = Math.max(b?.availableSeats ?? -1, b?.expectedAvailableSeatsAfterNextStop ?? -1)
+  if (!cap || best < 0) return null
+  // Thresholds relative to capacity: a comfortable number of seats, a few, or none.
+  const comfy = Math.max(3, Math.round(cap * 0.1))   // e.g. 5 on a 50-seater
+  if (best >= comfy) return { label: 'Likely seat', cls: 'badge-live', dot: 'bg-live' }
+  if (best >= 1) return { label: 'Standing', cls: 'badge-stale', dot: 'bg-stale' }
+  return { label: 'Full', cls: 'badge-danger', dot: 'bg-danger' }
+}
+
 /* --- The bus card used in the route results list --- */
 const BusCard = ({ b, now, focused, onFocus }) => {
   const gps = gpsStateOf(b, now)
   const cap = b.maxCapacity || 50
   const occ = b.currentOccupancy ?? 0
   const eta = b.remainingStopsEta?.[0]
+  const seat = seatConfidence(b)
   return (
     <button
       onClick={() => onFocus(b)}
       aria-label={`Focus ${b.busNumber || 'bus'} on the map`}
       className={`card-interactive p-4 ${focused ? 'border-accent bg-accent/[0.06]' : ''}`}
     >
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <span className="font-bold tracking-tight truncate">{b.busNumber || `Bus #${b.busId}`}</span>
-        <span className={gps === 'live' ? 'badge-live' : gps === 'stale' ? 'badge-stale' : 'badge-offline'}>
-          <span className={`status-dot ${gps === 'live' ? 'bg-live pulse-live' : gps === 'stale' ? 'bg-stale' : 'bg-offline'}`} />
-          {gps === 'live' ? 'Live' : gps === 'stale' ? 'Location stale' : 'No GPS'}
-        </span>
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <span className="font-bold tracking-tight truncate min-w-0">{b.busNumber || `Bus #${b.busId}`}</span>
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+          {seat && (
+            <span className={seat.cls} title="Chance of getting a seat">
+              <span className={`status-dot ${seat.dot}`} />
+              {seat.label}
+            </span>
+          )}
+          <span className={gps === 'live' ? 'badge-live' : gps === 'stale' ? 'badge-stale' : 'badge-offline'}>
+            <span className={`status-dot ${gps === 'live' ? 'bg-live pulse-live' : gps === 'stale' ? 'bg-stale' : 'bg-offline'}`} />
+            {gps === 'live' ? 'Live' : gps === 'stale' ? 'Location stale' : 'No GPS'}
+          </span>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 text-sm mb-1 min-w-0">
@@ -268,6 +506,25 @@ function Home() {
   const [selectedRoute, setSelectedRoute] = useState(null)
   const [routeStops, setRouteStops] = useState([])   // ordered static stops of the selected route
   const [routeBuses, setRouteBuses] = useState({})   // tripId -> LiveTripStateDto
+
+  // Browser-only convenience lists. Seeded from localStorage (safely) and written
+  // back on change; they never trigger a backend request of their own.
+  const [favorites, setFavorites] = useState(() => readRouteList(FAV_KEY))
+  const [recents, setRecents] = useState(() => readRouteList(RECENT_KEY))
+
+  // Nearby Stops (frontend-only, on-demand). The passenger's location is used in
+  // memory only - never stored, never sent to the backend, never watched.
+  const [nearbyOpen, setNearbyOpen] = useState(false)
+  const [nearbyStatus, setNearbyStatus] = useState('idle') // idle|loading|ok|denied|unsupported|error
+  const [nearbyStops, setNearbyStops] = useState([])
+  const [nearbyFocusId, setNearbyFocusId] = useState(null)
+  const allStopsRef = useRef(null) // cached deduped stop list, so re-opening refetches nothing
+
+  // Share-link: a transient "Link copied!" (or fallback) message, and a one-shot
+  // guard so a ?route= URL param opens the route only once on first load.
+  const [shareMsg, setShareMsg] = useState('')
+  const [searchParams] = useSearchParams()
+  const didAutoOpenRef = useRef(false)
   const [routeLoading, setRouteLoading] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [panTarget, setPanTarget] = useState(null)
@@ -417,17 +674,6 @@ function Home() {
   // Endpoints for display. Search results are lightweight ({id,name}) with no
   // nested stops, so parse origin → destination from the name when present
   // (BMTC names read "285 · Origin → Destination"); fall back to fetched stops.
-  const endpointsFromName = (name) => {
-    if (!name) return null
-    const afterDot = name.includes('·') ? name.split('·').slice(1).join('·').trim() : name
-    // Accept "Origin → Destination" (BMTC) or "Origin - Destination" (seeded names).
-    const sep = afterDot.includes('→') ? '→' : (/\s-\s/.test(afterDot) ? ' - ' : null)
-    if (sep) {
-      const [from, to] = afterDot.split(sep).map(s => s.trim())
-      if (from && to) return { from, to }
-    }
-    return null
-  }
   const routeEndpoints = (r) => {
     const fromName = endpointsFromName(r?.name)
     if (fromName) return fromName
@@ -441,11 +687,101 @@ function Home() {
   // Suggestions come straight from the server (already limited); no client filter.
   const routeSuggestions = routes
 
+  const sameId = (a, b) => String(a) === String(b)
+  const isFavorite = (id) => favorites.some(f => sameId(f.id, id))
+
+  const toggleFavorite = (route) => {
+    setFavorites((prev) => {
+      const exists = prev.some(f => sameId(f.id, route.id))
+      const next = exists
+        ? prev.filter(f => !sameId(f.id, route.id))
+        : [{ id: route.id, name: route.name }, ...prev]
+      writeRouteList(FAV_KEY, next)
+      return next
+    })
+  }
+
+  /** Newest first, no duplicates, capped at MAX_RECENT. */
+  const pushRecent = (route) => {
+    setRecents((prev) => {
+      const next = [{ id: route.id, name: route.name },
+                    ...prev.filter(r => !sameId(r.id, route.id))].slice(0, MAX_RECENT)
+      writeRouteList(RECENT_KEY, next)
+      return next
+    })
+  }
+
+  const clearRecents = () => {
+    setRecents([])
+    writeRouteList(RECENT_KEY, [])
+  }
+
+  /** Live buses currently known for a route, from the active-trip list already loaded. */
+  const liveCountFor = (routeId) =>
+    activeTrips.filter(t => sameId(t.liveState?.routeId ?? t.route?.id, routeId)).length
+
+  // Load every stop's coordinates ONCE, reusing the existing public /api/routes
+  // (which already returns routes with their nested stops). Deduped by stop id.
+  const loadAllStops = async () => {
+    if (allStopsRef.current) return allStopsRef.current
+    const res = await apiRequest('/api/routes')
+    const byId = new Map()
+    for (const r of res.data || []) {
+      for (const rs of r.routeStops || []) {
+        const s = rs.stop
+        if (!s || s.latitude == null || s.longitude == null) continue // ignore invalid coords
+        const lat = Number(s.latitude), lon = Number(s.longitude)
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || (lat === 0 && lon === 0)) continue
+        if (!byId.has(s.id)) byId.set(s.id, { id: s.id, name: s.name, lat, lon })
+      }
+    }
+    allStopsRef.current = [...byId.values()]
+    return allStopsRef.current
+  }
+
+  // One-shot geolocation (never watchPosition). Location stays in this function -
+  // not stored, not persisted, not sent anywhere.
+  const findNearbyStops = () => {
+    setNearbyOpen(true)
+    setNearbyFocusId(null)
+    if (!navigator.geolocation) { setNearbyStatus('unsupported'); return }
+    setNearbyStatus('loading')
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { latitude, longitude } = pos.coords
+          const stops = await loadAllStops()
+          const nearest = stops
+            .map(s => ({ ...s, meters: haversineMeters(latitude, longitude, s.lat, s.lon) }))
+            .sort((a, b) => a.meters - b.meters)
+            .slice(0, 5)
+          setNearbyStops(nearest)
+          setNearbyStatus('ok')
+        } catch {
+          setNearbyStatus('error')
+        }
+      },
+      (err) => setNearbyStatus(err.code === err.PERMISSION_DENIED ? 'denied' : 'error'),
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+    )
+  }
+
+  const closeNearby = () => { setNearbyOpen(false); setNearbyFocusId(null) }
+
+  // Clicking a nearby stop highlights it and, when a route map is open, pans to it.
+  // It never changes route selection or invents a trip (per spec fallback).
+  const focusNearbyStop = (s) => {
+    setNearbyFocusId(s.id)
+    // New object reference each click re-triggers PanTo (which keys on `target`).
+    setPanTarget({ lat: s.lat, lon: s.lon })
+  }
+
   const selectRoute = async (route) => {
     setSelectedRoute(route)
     setSelectedTripId(null)
     setShowSuggestions(false)
     setSearchQuery(route.name)
+    pushRecent(route)   // remember it for next time (browser-only)
     setRouteLoading(true)
     setRouteStops([])
     setRouteBuses({})
@@ -474,6 +810,50 @@ function Home() {
     setPanTarget(null)
     setFocusedTripId(null)
   }
+
+  // Open a route from its id alone (e.g. a shared link). Resolves the name via the
+  // existing /api/routes/{id}, then reuses selectRoute. Invalid/unknown ids are
+  // ignored so a bad link never crashes the page.
+  const openRouteById = useCallback(async (id) => {
+    if (id == null || Number.isNaN(Number(id))) return
+    try {
+      const res = await apiRequest(`/api/routes/${id}`)
+      const data = res.data
+      if (data && data.id != null) selectRoute({ id: data.id, name: data.name })
+    } catch {
+      // unknown route id / network error - leave the page on its default view
+    }
+  }, []) // selectRoute is stable within a render; intentionally not re-created
+
+  // Copy a shareable link to the selected route. Clipboard-only; nothing is sent
+  // anywhere and no navigation happens. Falls back gracefully if the API is absent.
+  const shareRoute = async () => {
+    if (!selectedRoute) return
+    const url = `${window.location.origin}/home?route=${selectedRoute.id}`
+    const flash = (msg) => { setShareMsg(msg); setTimeout(() => setShareMsg(''), 2500) }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url)
+        flash('Link copied!')
+      } else {
+        flash('Copy not supported — copy from the address bar')
+      }
+    } catch {
+      flash('Couldn’t copy — copy from the address bar')
+    }
+  }
+
+  // On first load, open a route named by ?route=<id> (from a shared link). Runs
+  // once; a missing or invalid id is a no-op (openRouteById handles it).
+  useEffect(() => {
+    if (didAutoOpenRef.current) return
+    const id = searchParams.get('route')
+    if (!id) return
+    didAutoOpenRef.current = true
+    // openRouteById is async: its state updates happen after an await, not
+    // synchronously in this effect body.
+    openRouteById(id) // eslint-disable-line react-hooks/set-state-in-effect
+  }, [searchParams, openRouteById])
 
   const focusBus = (b) => {
     setFocusedTripId(b.tripId)
@@ -584,6 +964,66 @@ function Home() {
             )}
           </div>
 
+          {/* --- Nearby Stops (frontend-only; location used in memory only) --- */}
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => (nearbyOpen ? closeNearby() : findNearbyStops())}
+              aria-expanded={nearbyOpen}
+              className="btn-secondary btn-sm"
+            >
+              <MapPin size={15} /> {nearbyOpen ? 'Hide nearby stops' : 'Nearby stops'}
+            </button>
+
+            {nearbyOpen && (
+              <div className="mt-2 card p-3">
+                {nearbyStatus === 'loading' && (
+                  <p className="text-sm text-text-secondary py-1">Finding stops near you…</p>
+                )}
+                {nearbyStatus === 'unsupported' && (
+                  <p className="text-sm text-text-secondary py-1">Your browser doesn’t support location services.</p>
+                )}
+                {(nearbyStatus === 'denied' || nearbyStatus === 'error') && (
+                  <div className="py-1">
+                    <p className="text-sm text-text-secondary mb-2">
+                      {nearbyStatus === 'denied'
+                        ? 'Location access is required to find nearby stops.'
+                        : 'Couldn’t determine your location. Please try again.'}
+                    </p>
+                    <button type="button" onClick={findNearbyStops} className="btn-secondary btn-sm">Retry</button>
+                  </div>
+                )}
+                {nearbyStatus === 'ok' && nearbyStops.length === 0 && (
+                  <p className="text-sm text-text-secondary py-1">No stops with coordinates found nearby.</p>
+                )}
+                {nearbyStatus === 'ok' && nearbyStops.length > 0 && (
+                  <>
+                    <p className="eyebrow mb-2 flex items-center gap-1.5"><MapPin size={13} /> Nearest stops</p>
+                    <ol className="space-y-1">
+                      {nearbyStops.map((s, i) => (
+                        <li key={`nearby-${s.id}`}>
+                          <button
+                            type="button"
+                            onClick={() => focusNearbyStop(s)}
+                            className={`w-full text-left rounded-lg px-2.5 py-2 flex items-center gap-2.5 transition-colors ${
+                              nearbyFocusId === s.id ? 'bg-accent/[0.08]' : 'hover:bg-hover'
+                            }`}
+                          >
+                            <span className="numeric text-xs text-text-muted w-4 shrink-0">{i + 1}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-medium truncate">{s.name}</span>
+                              <span className="block text-xs text-text-secondary numeric">{formatDistance(s.meters)}</span>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
           {selectedRoute && (
             <div className="mt-4 flex items-center gap-2.5 min-w-0">
               <span className="route-pill">{(selectedRoute.name || '').split('·')[0].trim() || 'Route'}</span>
@@ -594,7 +1034,33 @@ function Home() {
                 <span className={`status-dot ${liveCount > 0 ? 'bg-live pulse-live' : 'bg-offline'}`} />
                 {liveCount} {liveCount === 1 ? 'bus' : 'buses'}
               </span>
+              <button
+                type="button"
+                onClick={() => toggleFavorite(selectedRoute)}
+                aria-label={isFavorite(selectedRoute.id) ? 'Remove from favourites' : 'Add to favourites'}
+                aria-pressed={isFavorite(selectedRoute.id)}
+                title={isFavorite(selectedRoute.id) ? 'Remove from favourites' : 'Add to favourites'}
+                className={`shrink-0 p-2 rounded-lg transition-colors ${
+                  isFavorite(selectedRoute.id)
+                    ? 'text-stale hover:bg-hover'
+                    : 'text-text-muted hover:text-text-primary hover:bg-hover'
+                }`}
+              >
+                <Star size={18} fill={isFavorite(selectedRoute.id) ? 'currentColor' : 'none'} />
+              </button>
+              <button
+                type="button"
+                onClick={shareRoute}
+                aria-label="Copy a shareable link to this route"
+                title="Copy share link"
+                className="shrink-0 p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-hover transition-colors"
+              >
+                <Share2 size={17} />
+              </button>
             </div>
+          )}
+          {shareMsg && (
+            <p className="mt-2 text-xs text-live" role="status">{shareMsg}</p>
           )}
         </div>
 
@@ -843,6 +1309,13 @@ function Home() {
               </>
             ) : (
               <>
+                {/* Only shown when at least one bus is live; zero-bus behaviour below is unchanged. */}
+                <BusDecisionAssistant
+                  buses={routeBusList}
+                  now={now}
+                  focusedTripId={focusedTripId}
+                  onFocus={focusBus}
+                />
                 {routeBusList.length === 0 ? (
                   <div className="rounded-xl border border-border-subtle bg-dark px-4 py-3 text-sm text-text-secondary flex items-center gap-2">
                     <span className="status-dot bg-offline" />
@@ -867,7 +1340,29 @@ function Home() {
                 )}
               </>
             )
-          ) : filteredTrips.length === 0 ? (
+          ) : (
+          <>
+            {/* Browser-only shortcuts; rendered only when they hold something. */}
+            <SavedRouteList
+              title="Favourite routes"
+              Icon={Star}
+              routes={favorites}
+              liveCountFor={liveCountFor}
+              isFav={isFavorite}
+              onSelect={selectRoute}
+              onToggleFav={toggleFavorite}
+            />
+            <SavedRouteList
+              title="Recent searches"
+              Icon={Clock}
+              routes={recents}
+              liveCountFor={liveCountFor}
+              isFav={isFavorite}
+              onSelect={selectRoute}
+              onToggleFav={toggleFavorite}
+              onClear={clearRecents}
+            />
+            {filteredTrips.length === 0 ? (
             <div className="empty-state">
               <div className="w-14 h-14 rounded-full bg-hover flex items-center justify-center mb-4">
                 <MapPin size={24} className="opacity-40" />
@@ -904,6 +1399,8 @@ function Home() {
                 </button>
               )
             })
+            )}
+          </>
           )}
         </div>
       </div>

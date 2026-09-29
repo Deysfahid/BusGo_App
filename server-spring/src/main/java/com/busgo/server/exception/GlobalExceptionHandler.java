@@ -43,6 +43,16 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
+    /**
+     * A rejected Google/Firebase sign-in (invalid token, unverified email, or a
+     * deactivated account) - 401 rather than a generic 500.
+     */
+    @ExceptionHandler(SecurityException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSecurity(SecurityException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidationException(MethodArgumentNotValidException ex) {
         String errors = ex.getBindingResult().getFieldErrors().stream()

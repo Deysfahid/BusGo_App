@@ -39,6 +39,21 @@ export const AuthProvider = ({ children }) => {
     return response
   }, [persist])
 
+  // Google Sign-In: exchange a Firebase ID token for the existing BusGo JWT. The
+  // resulting session is stored exactly like a normal login, so everything
+  // downstream (ProtectedRoute, RBAC, WebSocket auth) is unchanged.
+  const firebaseLogin = useCallback(async (idToken) => {
+    const response = await apiRequest('/api/auth/firebase', {
+      method: 'POST',
+      body: JSON.stringify({ idToken }),
+    })
+    const { token, user } = response.data || response
+    setToken(token)
+    setUser(user)
+    persist(token, user)
+    return response
+  }, [persist])
+
   const register = useCallback(async (payload) => {
     const response = await apiRequest('/api/auth/register', {
       method: 'POST',
@@ -62,11 +77,12 @@ export const AuthProvider = ({ children }) => {
       token,
       user,
       login,
+      firebaseLogin,
       register,
       logout,
       isAuthenticated: Boolean(token),
     }),
-    [token, user, login, register, logout]
+    [token, user, login, firebaseLogin, register, logout]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -34,3 +34,19 @@ app:
     # anything weaker, so a missing value fails rather than degrading silently.
     secret: ${APP_JWT_SECRET:}
     expirationMs: ${APP_JWT_EXPIRATION_MS:86400000} # 24 hours
+
+# --- Authentication / onboarding ---
+busgo:
+  # The first admin: this Google account becomes ADMIN on first sign-in. Server-side
+  # only - nobody can grant themselves ADMIN from the frontend.
+  initial-admin-email: ${BUSGO_INITIAL_ADMIN_EMAIL:}
+
+# Firebase Admin SDK (Google Sign-In identity verification only). All optional:
+# when unset, the app runs normally and only Google Sign-In is disabled.
+firebase:
+  project-id: ${FIREBASE_PROJECT_ID:}
+  # Provide EITHER the raw service-account JSON (FIREBASE_SERVICE_ACCOUNT_JSON) OR a
+  # path to the JSON file (GOOGLE_APPLICATION_CREDENTIALS). The JSON is a SECRET and
+  # must never be committed.
+  credentials-json: ${FIREBASE_SERVICE_ACCOUNT_JSON:}
+  credentials-path: ${GOOGLE_APPLICATION_CREDENTIALS:}

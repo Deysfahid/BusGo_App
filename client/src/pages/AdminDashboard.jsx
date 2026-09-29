@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { apiRequest } from '../lib/api'
 import { connectWebSocket, disconnectWebSocket } from '../lib/websocket'
-import { Bus, Route as RouteIcon, MapPin, Users, Ticket, TrendingUp, DollarSign, Plus, Search, Trash2, Brain, Clock, Activity } from 'lucide-react'
+import { Bus, Route as RouteIcon, MapPin, Users, Ticket, TrendingUp, DollarSign, Plus, Search, Trash2, Brain, Clock, Activity, ShieldCheck, UserPlus, Power } from 'lucide-react'
 
 export default function AdminDashboard() {
   const location = useLocation()
@@ -16,6 +16,7 @@ export default function AdminDashboard() {
     if (path.includes('/conductors')) return 'conductors'
     if (path.includes('/analytics')) return 'analytics'
     if (path.includes('/predictions')) return 'predictions'
+    if (path.includes('/staff')) return 'staff'
     return 'overview'
   }
 
@@ -30,6 +31,7 @@ export default function AdminDashboard() {
       case 'conductors': return <ConductorsTab />
       case 'analytics': return <AnalyticsTab />
       case 'predictions': return <PredictionsTab />
+      case 'staff': return <StaffTab />
       default: return <OverviewTab />
     }
   }
@@ -1255,6 +1257,146 @@ function PredictionsTab() {
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-crowd-high inline-block" /> High</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-crowd-full inline-block" /> Full</span>
             </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// --- Staff Management: authorize Google emails as ADMIN/CONDUCTOR ---
+function StaffTab() {
+  const token = localStorage.getItem('busgo_token')
+  const [staff, setStaff] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState('CONDUCTOR')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const fetchStaff = () => {
+    apiRequest('/api/admin/staff', { authToken: token })
+      .then(res => setStaff(res.data || []))
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => {
+    apiRequest('/api/admin/staff', { authToken: token })
+      .then(res => setStaff(res.data || []))
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const addStaff = async (e) => {
+    e.preventDefault()
+    setError('')
+    setSaving(true)
+    try {
+      await apiRequest('/api/admin/staff', {
+        method: 'POST', authToken: token,
+        body: JSON.stringify({ email: email.trim(), role }),
+      })
+      setEmail('')
+      fetchStaff()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const toggleActive = async (s) => {
+    setError('')
+    try {
+      const action = s.active ? 'deactivate' : 'reactivate'
+      await apiRequest(`/api/admin/staff/${s.id}/${action}`, { method: 'POST', authToken: token })
+      fetchStaff()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <ShieldCheck size={22} className="text-accent" />
+        <h1 className="page-title">Staff Management</h1>
+      </div>
+      <p className="text-sm text-text-secondary mb-5">
+        Authorize a person’s Google email as staff. They then sign in with Google once to
+        create their account; nobody can grant themselves ADMIN or CONDUCTOR.
+      </p>
+
+      {error && (
+        <div role="alert" className="badge-danger mb-4 !rounded-lg !px-3 !py-2 !normal-case !tracking-normal">{error}</div>
+      )}
+
+      <form onSubmit={addStaff} className="card card-pad mb-6 flex flex-col sm:flex-row gap-3 sm:items-end">
+        <div className="flex-1">
+          <label htmlFor="staff-email" className="label">Google email</label>
+          <input id="staff-email" type="email" required value={email}
+                 onChange={(e) => setEmail(e.target.value)}
+                 placeholder="person@gmail.com" className="input" autoComplete="off" />
+        </div>
+        <div className="sm:w-48">
+          <label htmlFor="staff-role" className="label">Role</label>
+          <select id="staff-role" value={role} onChange={(e) => setRole(e.target.value)} className="select">
+            <option value="CONDUCTOR">Conductor</option>
+            <option value="ADMIN">Admin</option>
+          </select>
+        </div>
+        <button type="submit" disabled={saving} className="btn-primary">
+          <UserPlus size={18} /> {saving ? 'Saving…' : 'Authorize'}
+        </button>
+      </form>
+
+      <div className="card overflow-hidden">
+        {loading ? (
+          <div className="p-5 space-y-3">
+            <div className="skeleton h-10 w-full" /><div className="skeleton h-10 w-full" />
+          </div>
+        ) : staff.length === 0 ? (
+          <div className="empty-state">
+            <Users size={28} className="opacity-30 mb-3" />
+            <p className="font-semibold text-text-primary mb-1">No staff authorized yet</p>
+            <p className="text-sm">Authorize a conductor or admin email above.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-text-secondary border-b border-border-subtle">
+                  <th className="px-4 py-3 font-medium">Email</th>
+                  <th className="px-4 py-3 font-medium">Role</th>
+                  <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Signed up</th>
+                  <th className="px-4 py-3 font-medium text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {staff.map(s => (
+                  <tr key={s.id} className="border-b border-border-subtle last:border-0">
+                    <td className="px-4 py-3 font-medium truncate">{s.email}</td>
+                    <td className="px-4 py-3">
+                      <span className="badge-accent">{s.role}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={s.active ? 'badge-live' : 'badge-offline'}>
+                        <span className={`status-dot ${s.active ? 'bg-live' : 'bg-offline'}`} />
+                        {s.active ? 'Active' : 'Deactivated'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-text-secondary">{s.accountExists ? 'Yes' : 'Not yet'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button onClick={() => toggleActive(s)}
+                              className={s.active ? 'btn-danger btn-sm' : 'btn-secondary btn-sm'}>
+                        <Power size={15} /> {s.active ? 'Deactivate' : 'Reactivate'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

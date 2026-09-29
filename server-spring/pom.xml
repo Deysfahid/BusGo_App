@@ -105,6 +105,15 @@
 				</exclusion>
 			</exclusions>
 		</dependency>
+
+		<!-- Firebase Admin SDK: verifies Google Sign-In (Firebase) ID tokens on the
+		     backend. Firebase is ONLY the identity provider; BusGo keeps its own JWT,
+		     roles, and PostgreSQL data. -->
+		<dependency>
+			<groupId>com.google.firebase</groupId>
+			<artifactId>firebase-admin</artifactId>
+			<version>9.3.0</version>
+		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa-test</artifactId>
